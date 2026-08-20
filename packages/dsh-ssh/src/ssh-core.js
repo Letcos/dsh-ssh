@@ -43,6 +43,11 @@ export class SshError extends Error {
   }
 }
 
+function isNotConnectedError(err) {
+  const msg = err?.message ?? String(err);
+  return msg.includes('Not connected');
+}
+
 // ---------- command assembly (single-quote escape: ' -> '\'' ) ----------
 export function shellQuoteSingle(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
@@ -240,9 +245,33 @@ export class SshConn {
     this._sftpPromise = null;
     this._sftpUnavailable = false; // whether SFTP probing failed on this connection (decided on first fs())
     this.verifyError = null;  // set by makeHostVerifier
+    this._dead = false; // becomes true when the underlying ssh2 client emits close unexpectedly
+    this._isClosing = false; // true while dispose() is intentionally closing the client
+    // Called when the ssh2 client dies unexpectedly (keepalive failure, network drop, remote close).
+    // Marks the connection as dead and clears cached state so the next connect() can rebuild.
+    // Ignored when the close was caused by an intentional dispose().
+    this._onClose = () => {
+      if (this._isClosing) return;
+      this._dead = true;
+      this.client = null;
+      this._ready = null;
+      this._sftpPromise = null;
+      this._sftpUnavailable = false;
+    };
   }
 
   get hostId() { return this.id; }
+
+  // Clear cached state after a dead connection so the next connect() rebuilds from scratch.
+  _resetDeadState() {
+    this._dead = false;
+    this._isClosing = false;
+    this._ready = null;
+    this.client = null;
+    this._sftpPromise = null;
+    this._sftpUnavailable = false;
+    this.verifyError = null;
+  }
 
   async _loadPrivateKey() {
     const auth = this.cfg.auth;
@@ -261,11 +290,19 @@ export class SshConn {
   }
 
   async connect() {
+    // Lazy reconnect: a dead connection clears its cached promise so the next call rebuilds.
+    if (this._dead) this._resetDeadState();
     if (this._ready) return this._ready;
     this._ready = (async () => {
       try {
         return await this._connectInner();
       } catch (err) {
+        // Keep the failure visible but allow a later retry: clear the rejected promise
+        // when the error indicates the connection is dead.
+        if (isNotConnectedError(err) || (err instanceof SshError && err.stage === 'not-connected')) {
+          this._ready = null;
+          this._dead = true;
+        }
         // Unified error surface: bottom-level errors (private key / known_hosts reads) carry hostId/stage too
         if (err instanceof SshError) throw err;
         throw new SshError({ hostId: this.id, stage: 'connect', message: err?.message ?? String(err), cause: err });
@@ -279,6 +316,9 @@ export class SshConn {
       const privateKey = await this._loadPrivateKey();
       const client = new Client();
       this.client = client;
+      // Track intentional close to avoid marking dispose as a dead connection.
+      this._isClosing = false;
+      this._dead = false;
       const { host, port = 22, user } = this.cfg;
       const opts = {
         host, port, username: user,
@@ -321,25 +361,45 @@ export class SshConn {
         client.connect(opts);
       });
       if (this.verifyError) { await this._close(); throw this.verifyError; }
+      // Detect remote-initiated or keepalive-driven disconnects. ssh2 emits 'close'
+      // for network failures, keepalive timeouts, and remote sshd closes; dispose()
+      // sets _isClosing so the handler ignores intentional shutdowns.
+      client.on('close', this._onClose);
+      client.on('end', this._onClose);
+      client.on('error', this._onClose);
       return this;
   }
 
   async _close() {
     if (this.client) {
       const c = this.client;
+      // Mark intentional shutdown so the 'close' handler does not flag this as dead.
+      this._isClosing = true;
+      try { c.removeListener('close', this._onClose); } catch { /* noop */ }
+      try { c.removeListener('end', this._onClose); } catch { /* noop */ }
+      try { c.removeListener('error', this._onClose); } catch { /* noop */ }
       this.client = null;
       this._sftpPromise = null;
       this._sftpUnavailable = false; // reset the probe after reconnect (a fresh SshConn already resets; this is a safety net)
       try { c.end(); } catch { /* noop */ }
+    } else {
+      // Even without a client, clear dead state on explicit dispose so a later
+      // connect starts clean.
+      this._isClosing = true;
     }
+    // Reset closing flag after the synchronous end() call; asynchronous 'close'
+    // will be ignored due to listener removal, but keep flag for safety.
+    this._isClosing = false;
+    // Clear dead marker on intentional close so a subsequent connect rebuilds normally.
+    this._dead = false;
+    this._ready = null;
   }
 
   _ensureOpen() {
     if (!this.client) throw new SshError({ hostId: this.id, stage: 'not-connected', message: 'connection not open (host ' + (this.cfg.host ?? this.id) + ')' });
   }
 
-  async _execChannel(cmd, opts = {}) {
-    await this.connect();
+  async _doExecChannel(cmd, opts = {}) {
     this._ensureOpen();
     const full = buildRemoteCommand(cmd, opts.cwd);
     return new Promise((resolve, reject) => {
@@ -354,6 +414,25 @@ export class SshConn {
         reject(new SshError({ hostId: this.id, stage: 'exec-open', message: err?.message ?? String(err), cause: err }));
       }
     });
+  }
+
+  async _execChannel(cmd, opts = {}) {
+    try {
+      await this.connect();
+      return await this._doExecChannel(cmd, opts);
+    } catch (err) {
+      if (!isNotConnectedError(err)) throw err;
+      // Transparent single retry: clear dead state, reconnect, and re-attempt once.
+      // Streaming exec that has already started is not retried (caller handles mid-stream errors).
+      this._dead = true;
+      this._resetDeadState();
+      try {
+        await this.connect();
+        return await this._doExecChannel(cmd, opts);
+      } catch (err2) {
+        throw new SshError({ hostId: this.id, stage: 'exec-open', message: 'reconnect failed after disconnect: ' + (err2?.message ?? String(err2)), cause: err2 });
+      }
+    }
   }
 
   async exec(cmd, opts = {}) {
@@ -410,8 +489,7 @@ export class SshConn {
     yield { exitCode };
   }
 
-  async sftp() {
-    await this.connect();
+  async _doSftpOpen() {
     this._ensureOpen();
     if (!this._sftpPromise) {
       this._sftpPromise = new Promise((resolve, reject) => {
@@ -427,6 +505,23 @@ export class SshConn {
       });
     }
     return new SftpWrapper(this, await this._sftpPromise);
+  }
+
+  async sftp() {
+    try {
+      await this.connect();
+      return await this._doSftpOpen();
+    } catch (err) {
+      if (!isNotConnectedError(err)) throw err;
+      this._dead = true;
+      this._resetDeadState();
+      try {
+        await this.connect();
+        return await this._doSftpOpen();
+      } catch (err2) {
+        throw new SshError({ hostId: this.id, stage: 'sftp-open', message: 'reconnect failed after disconnect: ' + (err2?.message ?? String(err2)), cause: err2 });
+      }
+    }
   }
 
   // Unified file-access entry. When SFTP is available -> SftpWrapper (byte-identical
@@ -632,7 +727,17 @@ export class SshPool {
     if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
     const id = cfg.id ?? cfg.host;
     const existing = this.conns.get(id);
-    if (existing) return existing.connect(); // reuse open conn; idempotent connect()
+    if (existing) {
+      // Only an explicitly dead connection (close event fired) is invalidated and rebuilt.
+      // A missing client alone does not qualify: during an in-flight first connect the
+      // client is not yet created, and that acquire must reuse the pending connect()
+      // promise, not race it with a second connection.
+      if (existing._dead) {
+        await this.invalidate(id);
+      } else {
+        return existing.connect(); // reuse open conn; idempotent connect()
+      }
+    }
     if (this.conns.size >= this.maxConnections) await new Promise((r) => this.waiters.push(r));
     const conn = new SshConn(cfg);
     this.conns.set(id, conn);
