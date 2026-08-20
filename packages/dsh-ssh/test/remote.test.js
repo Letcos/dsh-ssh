@@ -529,7 +529,9 @@ test('createPlaceholder registry 失败 → SshError(stage placeholder), 不静�
   } finally {
     fsMod.rmSync(tmp, { recursive: true, force: true });
   }
-// ── A.34(TOFU): 宿主侧信任保存 + 浏览方法的结构化 host-key-unknown 返回值 ──
+});
+
+// TOFU: host-side trust persistence + structured host-key-unknown browse results
 test('trustHostKey appends the confirmed key to a temp known_hosts, idempotently, fingerprint-validated', async () => {
   const ctx = new Context();
   const dir = mkdtempSync(path.join(os.tmpdir(), 'dsh-ssh-trust-'));
@@ -582,5 +584,4 @@ test('resolveRemoteHome surfaces a host-key-unknown as a structured VALUE (not a
   assert.equal(res.rawKeyBase64, 'Zm9v');
   assert.equal(res.keyType, 'ssh-ed25519');
   ctx.dispose?.();
-});
 });
