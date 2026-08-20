@@ -7,7 +7,14 @@
 
 通过 SSH 把 DeepSeek Harness 的工作区放到任意一台远端机器上 —— 直接在 DSH 设置页里配置主机、把它某个目录选成工作区，之后所有 bash / 文件 / 搜索工具调用都在那台机器上执行，而不是在你本机。
 
-<!-- TODO: screenshot -->
+<p align="center">
+  <img src="docs/images/dsh-ssh-settings.png" alt="设置页配置 SSH 主机" width="720"><br>
+  <em>设置页里添加 SSH 主机</em>
+</p>
+<p align="center">
+  <img src="docs/images/dsh-ssh-workspace.png" alt="浏览远端目录并选为工作区" width="720"><br>
+  <em>浏览远端目录，选为工作区</em>
+</p>
 
 > **为什么选它**
 >

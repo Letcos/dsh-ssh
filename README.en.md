@@ -7,7 +7,14 @@
 
 Run your DeepSeek Harness workspace on any remote machine over SSH — right from the DSH settings page. Configure a host, pick one of its directories as a workspace, and every bash / file / search tool call runs on that machine instead of your own.
 
-<!-- TODO: screenshot -->
+<p align="center">
+  <img src="docs/images/dsh-ssh-settings.png" alt="Configure SSH hosts in settings" width="720"><br>
+  <em>Add SSH hosts in the settings page</em>
+</p>
+<p align="center">
+  <img src="docs/images/dsh-ssh-workspace.png" alt="Browse a remote directory and adopt it as workspace" width="720"><br>
+  <em>Browse a remote directory and pick it as the workspace</em>
+</p>
 
 > **Why dsh-ssh**
 >
