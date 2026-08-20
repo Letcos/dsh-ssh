@@ -5,7 +5,7 @@ DeepSeek Harness (DSH) 的 SSH 远程工作区插件：把另一台机器的目�
 > **给用户（产品页）**：功能、安装与快速上手见 [README.md](./README.md)（英文镜像 [README.en.md](../../README.en.md)）。本文件为面向开发者的文档（安装、测试体系、脚本清单、live 配置与目录结构）。
 
 > **状态：M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅（M5 已落地：方案⑤工具路由、bash 必注册、job controller、job_output 修复、后台任务 mkdir 修复、TOFU 弹窗、SFTP 降级、标题格式、bash 卡片 toolview、能力面注入、UI/UX 改版、测试体系）。**
-> 测试基线：**286 单测 fail=0**（node --test）+ **3090 真实服务 E2E 8/8**（scripts/e2e-web-3090.mjs）。
+> 测试基线：**295 单测 fail=0**（node --test）+ **3080 真实服务 E2E 8/8**（scripts/e2e-web-3080.mjs）。
 > 设计依据见仓库 .agents/notes/requirements-and-design.md（A.25 行为矩阵、A.26 能力面收口、A.34 TOFU、A.36 SFTP 降级、A.39 E2E）；SSH 远程语义对标业界见 .agents/notes/research/remote-capability-competitors.md。
 
 ---
@@ -92,7 +92,7 @@ dsh plugin --profile web add @dsh-ssh/dsh-ssh
 
 ```bash
 cd packages/dsh-ssh
-node --test test/*.test.js     # 基线: 286 tests, pass 286, fail 0
+node --test test/*.test.js     # 基线: 295 tests, pass 295, fail 0
 ```
 
 覆盖 ssh-core（连接池/exec/SFTP）、hosts-model、settings-schema、router（cwd 路由）、tool-routing-hook（方案⑤遮蔽）、exec-fs（SFTP 降级）、remote-jobs / jobs-controller（后台任务）、remote-wire / typert-contribution（通信契约）、capability-surface（能力面）、policy（sandbox 语义）、tools-local / tools-remote / tools-search / tools-sandbox、m4-placeholder / placeholder-cleanup 等。
@@ -124,24 +124,24 @@ node --test test/*.test.js     # 基线: 286 tests, pass 286, fail 0
 | `scripts/verify-remote-bg-created.mjs` | 远端后台任务 E2E 验证（A.35）：sleep 30 后台任务状态/增量输出/kill 进程组 |
 | `scripts/verify-execfs-fallback.mjs` | SFTP 降级（ExecFs）验证（A.36）：exec+base64 全链路 + 与 SFTP 路径结果对比 |
 | `scripts/client-selfcheck.mjs` | client.js 静态自检（无浏览器）：校验注入契约 / 遮蔽 priority / 内联 Typert 描述符与 lib 一致 —— **从仓库根运行**：`node packages/dsh-ssh/scripts/client-selfcheck.mjs` |
-| `scripts/e2e-web-3090.mjs` | 3090 真实服务全工具 E2E（8/8）：HTTP API 驱动真实会话跑 8 组工具用例 |
+| `scripts/e2e-web-3080.mjs` | 3080 真实服务全工具 E2E（8/8）：HTTP API 驱动真实会话跑 8 组工具用例 |
 | `test/live-background-verify.mjs` | 后台任务 sleep 30 验收（A.33）：启动 5s 仍 running、增量输出、kill 后远端无残留 |
 | `test/live-jobs.mjs` | 远端后台任务直接实测（A.22/A.30）：readOutput 同步契约 / 增量读 / completed / canceled 形状 |
 
 > 多数 live/verify 脚本需配置好真机（默认 ubuntu@203.0.113.10 / id_ed25519，可用环境变量切换）。它们只写远端 /tmp 下自建目录并在结束清理，不碰 ~/.dsh/settings.yaml 与用户 known_hosts。
 
-### e2e-web-3090.mjs 用法与前置
+### e2e-web-3080.mjs 用法与前置
 
-**作用**：不重启不停止 3090 服务，仅通过 POST `http://127.0.0.1:3090/api/<method>` 的信封（client-request）驱动真实 web-app 会话，对远端占位工作区跑 **8 组工具用例**（bash 前台 / write / read / edit / glob / grep / 后台链 / 清理），结尾用 bash 清理 e2e 产物。全部通过退出码 0（输出 PASS 汇总表 ≤60 行），任一失败退出码 1。
+**作用**：不重启不停止 3080 服务，仅通过 POST `http://127.0.0.1:3080/api/<method>` 的信封（client-request）驱动真实 web-app 会话，对远端占位工作区跑 **8 组工具用例**（bash 前台 / write / read / edit / glob / grep / 后台链 / 清理），结尾用 bash 清理 e2e 产物。全部通过退出码 0（输出 PASS 汇总表 ≤60 行），任一失败退出码 1。
 
 **前置**：
-- 一个正在运行、监听 3090 端口的 DSH web-app 服务（含本插件，`E2E_BASE` 环境变量可覆盖地址，默认 `http://127.0.0.1:3090`）；
+- 一个正在运行、监听 3080 端口的 DSH web-app 服务（含本插件，`E2E_BASE` 环境变量可覆盖地址，默认 `http://127.0.0.1:3080`）；
 - 已配置好真机远端（脚本内 hostId 为 `00000000-...` 占位 UUID，与 live-config 默认一致）且该主机可连；
 - 远端占位工作区目录存在（脚本内为 `/tmp/dsh-ssh-e2e-web` 的占位路径）；
 - 会话使用 provider `fusion-router` + 模型 `deepseek-v4-flash`（脚本内 MODEL 常量）。
 
 ```bash
-node packages/dsh-ssh/scripts/e2e-web-3090.mjs
+node packages/dsh-ssh/scripts/e2e-web-3080.mjs
 ```
 
 ---
@@ -161,12 +161,12 @@ node packages/dsh-ssh/scripts/e2e-web-3090.mjs
 
 ## 开发
 
-本仓库是 pnpm workspace，插件位于 `packages/dsh-ssh`（plain JS / ESM，无构建，决策 D7）。仓库无构建步骤；客户端 shell 的改动需 `pnpm run dev:web` 重建后刷新 3090 页面验证。
+本仓库是 pnpm workspace，插件位于 `packages/dsh-ssh`（plain JS / ESM，无构建，决策 D7）。仓库无构建步骤；客户端 shell 的改动需 `pnpm run dev:web` 重建后刷新 3080 页面验证。
 
 ```bash
 pnpm install
 cd packages/dsh-ssh
-node --test test/*.test.js                     # 单测（基线 286 fail=0）
+node --test test/*.test.js                     # 单测（基线 295 fail=0）
 node scripts/live-smoke.mjs                    # 冒烟（需配置测试远端）
 ```
 

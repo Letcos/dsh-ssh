@@ -1,5 +1,5 @@
-// @dsh-ssh/dsh-ssh — 3090 全工具 E2E(HTTP API 驱动真实 web-app 会话)
-// 作用: 不重启不停止 3090, 只通过 POST http://127.0.0.1:3090/api/<method> 的信封驱动真实会话,
+// @dsh-ssh/dsh-ssh — 3080 全工具 E2E(HTTP API 驱动真实 web-app 会话)
+// 作用: 不重启不停止 3080, 只通过 POST http://127.0.0.1:3080/api/<method> 的信封驱动真实会话,
 //       对远端占位工作区跑 8 组工具用例(bash 前台 / write / read / edit / glob / grep / 后台链 / 清理),
 //       结尾用 bash 清理 e2e 产物(保留目录)。
 // 信封: {"type":"client-request","rpcId":"x","method":"<m>","params":{},"payload":{...}}
@@ -10,15 +10,15 @@
 // 单回合判定: 轮询到「新增事件里出现 turn/end」即一回合结束(间隔 3s, 上限 150s)。
 // 工具结果: tool/call.data={callId,name,arguments};
 //           tool/result.data.message.content[0]={type:"tool-result",toolCallId,isError,content:[{type:"text",text}]}
-// 用法: node scripts/e2e-web-3090.mjs   (服务地址来自 live-config.mjs e2eBase, 可 DSH_SSH_TEST_E2E_BASE / E2E_BASE 覆盖)
+// 用法: node scripts/e2e-web-3080.mjs   (服务地址来自 live-config.mjs e2eBase, 可 DSH_SSH_TEST_E2E_BASE / E2E_BASE 覆盖)
 // 退出码: 全部通过 -> 0; 任一失败 -> 1。输出为 PASS/FAIL 汇总表(<=60 行)。
 // PREREQ: a running DSH web-app with this plugin, listening where live-config.mjs e2eBase
-// points (default http://127.0.0.1:3090; override DSH_SSH_TEST_E2E_BASE / E2E_BASE).
+// points (default http://127.0.0.1:3080; override DSH_SSH_TEST_E2E_BASE / E2E_BASE).
 // Switch machines via DSH_SSH_DSH_HOME + DSH_SSH_TEST_HOST_ID (placeholder root & hostId).
 
 import path from 'node:path';
 import { liveConfig, requireRealHost } from '../test/live-config.mjs';
-requireRealHost('scripts/e2e-web-3090');
+requireRealHost('scripts/e2e-web-3080');
 
 const base = liveConfig.e2eBase;
 const REMOTE = '/tmp/dsh-ssh-e2e-web';
@@ -226,7 +226,7 @@ for (const [no, fn] of cases) {
 
 // ---- 汇总 ----
 const maxLen = Math.max(...rows.map((r) => r.desc.length), 1);
-console.log('\n===== 3090 全工具 E2E 汇总 =====');
+console.log('\n===== 3080 全工具 E2E 汇总 =====');
 for (const r of rows) {
   console.log((r.pass ? 'PASS' : 'FAIL') + '  [用例 ' + r.no + '] ' + r.desc.padEnd(maxLen) + ' → ' + r.detail);
 }

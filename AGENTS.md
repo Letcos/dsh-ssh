@@ -55,7 +55,7 @@ node packages/dsh-ssh/scripts/client-selfcheck.mjs
 cd packages/dsh-ssh && node scripts/live-smoke.mjs               # 建连+exec+SFTP 冒烟
 cd packages/dsh-ssh && node scripts/functional-live-test.mjs     # 功能+兼容性实测
 cd packages/dsh-ssh && node scripts/verify-agent-created.mjs     # agent/created 遮蔽验证
-cd packages/dsh-ssh && node scripts/e2e-web-3090.mjs             # 全工具 E2E(E2E_BASE 可覆盖)
+cd packages/dsh-ssh && node scripts/e2e-web-3080.mjs             # 全工具 E2E(E2E_BASE 可覆盖)
 
 # 安装/卸载插件 bundle(用隔离测试 profile dsh-ssh-dev, 勿污染 web profile)
 dsh plugin --profile dsh-ssh-dev add <本仓库 packages/dsh-ssh 的本地路径>

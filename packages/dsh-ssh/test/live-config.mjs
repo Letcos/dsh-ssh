@@ -74,9 +74,9 @@ export const dshHome = resolveDshHome();
 // Env: DSH_SSH_TEST_PROFILE. Default points at the repo's dedicated test profile.
 export const profile = envStr('DSH_SSH_TEST_PROFILE', 'dsh-ssh-dev');
 
-// ---- E2E base URL (scripts/e2e-web-3090.mjs) ----
-// Env: DSH_SSH_TEST_E2E_BASE (or legacy E2E_BASE). Default: the local dev web-app on port 3090.
-export const e2eBase = envStr('DSH_SSH_TEST_E2E_BASE', envStr('E2E_BASE', 'http://127.0.0.1:3090'));
+// ---- E2E base URL (scripts/e2e-web-3080.mjs) ----
+// Env: DSH_SSH_TEST_E2E_BASE (or legacy E2E_BASE). Default: the local dev web-app on port 3080.
+export const e2eBase = envStr('DSH_SSH_TEST_E2E_BASE', envStr('E2E_BASE', 'http://127.0.0.1:3080'));
 
 // ---- placeholder root for remote workspaces (<dshHome>/remote) ----
 // Remote cwds live under this root as <root>/<hostId>/<base64url(remote>path)>.
