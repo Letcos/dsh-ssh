@@ -767,6 +767,8 @@ window.__ModuleLoader__.load({
     // ---------- components ----------
     var CSS = ".dsh-hosts{display:flex;flex-direction:column;gap:12px;max-width:720px;padding:4px 2px 20px;font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary,#e6e6e6)}" +
       ".dsh-hosts-header{display:flex;align-items:center;justify-content:space-between;gap:8px}" +
+      // Title/intro stack: official _section lays them out as flex siblings with gap 12px.
+      ".dsh-hosts-headtext{display:flex;flex-direction:column;gap:12px}" +
       // Typography mirrors the official settings section (AgentPresetSection.module.css,
       // dsh-client-ui-agent-preset): title 18/600, intro 13px tertiary, section gap 12px,
       // a group header in 12px/600 uppercase. The host rows themselves (.dsh-row*) stay as-is.
@@ -1252,7 +1254,7 @@ window.__ModuleLoader__.load({
       return React.createElement(React.Fragment, null,
         React.createElement("div", { className: "dsh-hosts" },
           React.createElement("div", { className: "dsh-hosts-header" },
-            React.createElement("div", null,
+            React.createElement("div", { className: "dsh-hosts-headtext" },
               React.createElement("h2", { className: "dsh-hosts-title" }, t("title")),
               React.createElement("div", { className: "dsh-hosts-intro" }, t("intro"))
             ),
