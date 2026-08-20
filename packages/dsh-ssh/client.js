@@ -42,7 +42,6 @@ window.__ModuleLoader__.load({
     var IconRefreshOutline16 = primitives.IconRefreshOutline16;
     var IconCloseOutline16 = primitives.IconCloseOutline16;
     var IconLoadingOutline16 = primitives.IconLoadingOutline16;
-    var IconGlobeOutline14 = primitives.IconGlobeOutline14;
     var IconFolderClose16 = primitives.IconFolderClose16;
     var IconChevronDownOutline14 = primitives.IconChevronDownOutline14;
     var Menu = primitives.Menu;
@@ -53,7 +52,7 @@ window.__ModuleLoader__.load({
     // ---------- locale ----------
     var ZH = {
       "nav": "SSH 连接",
-      "title": "远程主机",
+      "title": "SSH 连接",
       "intro": "把另一台机器的目录作为工作区。添加主机后，即可在其中创建会话，命令、文件与搜索都会在该机器上执行。口令留空表示沿用已保存的值。",
       "add": "添加主机",
       "edit": "编辑",
@@ -114,7 +113,7 @@ window.__ModuleLoader__.load({
     };
     var EN = {
       "nav": "SSH Connections",
-      "title": "Remote Hosts",
+      "title": "SSH Connections",
       "intro": "Add machines to use a folder on them as a workspace. Once added, sessions run there — commands, files, and search all execute on that machine. Leave the password blank to keep the saved value.",
       "add": "Add host",
       "edit": "Edit",
@@ -179,7 +178,6 @@ window.__ModuleLoader__.load({
       "intro": "选择本机或某台远程主机上的目录作为工作区。之后会话会在该目录所在机器上执行。",
       "tab.local": "本机",
       "tab.remote": "远程主机",
-      "tab.defaultHint": "(上次使用：远程)",
       "local.home": "主目录",
       "local.up": "上一级",
       "local.open": "打开",
@@ -227,7 +225,6 @@ window.__ModuleLoader__.load({
       "intro": "Pick a folder on this machine or on a remote host as the workspace. Sessions then run on that machine.",
       "tab.local": "This machine",
       "tab.remote": "Remote host",
-      "tab.defaultHint": "(last used: remote)",
       "local.home": "Home",
       "local.up": "Parent",
       "local.open": "Open",
@@ -305,6 +302,18 @@ window.__ModuleLoader__.load({
     }
     function displayAuthType(host) {
       return host && host.auth && host.auth.type === 'password' ? 'password' : 'key';
+    }
+    // Display-only masking for the host list: keep the first and last dot-segment and
+    // replace every middle segment with "***" (e.g. 49.***.***.93). Storage and
+    // connection use the full host value; only this list rendering is redacted.
+    function maskHostAddress(addr) {
+      var s = String(addr == null ? '' : addr);
+      var parts = s.split('.');
+      if (parts.length <= 2) return s;
+      var out = [parts[0]];
+      for (var i = 1; i < parts.length - 1; i++) out.push('***');
+      out.push(parts[parts.length - 1]);
+      return out.join('.');
     }
     function buildHostConfig(form, existingId, newPassword) {
       var password = String(newPassword != null ? newPassword : '').trim();
@@ -756,7 +765,9 @@ window.__ModuleLoader__.load({
     // ---------- components ----------
     var CSS = ".dsh-hosts{display:flex;flex-direction:column;gap:14px;padding:4px 2px 20px;font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary,#e6e6e6)}" +
       ".dsh-hosts-header{display:flex;align-items:center;justify-content:space-between;gap:8px}" +
-      ".dsh-hosts-title{font-size:15px;font-weight:600;line-height:22px}" +
+      // Mirrors the official settings section title (e.g. Models) so the heading
+      // reads at the same size/weight as the built-in settings detail pages.
+      ".dsh-hosts-title{margin:0;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:16px;font-weight:500;line-height:24px}" +
       ".dsh-hosts-intro{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}" +
       ".dsh-hosts-error{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-radius:10px;color:var(--dsw-alias-state-error-primary,#ef4444);background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 30%,transparent);font-size:12px;line-height:16px;word-break:break-word}" +
       ".dsh-hosts-empty{display:flex;align-items:center;justify-content:center;min-height:120px;border:1px dashed var(--dsw-alias-border-l2,#36373b);border-radius:12px;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-size:13px}" +
@@ -796,6 +807,7 @@ window.__ModuleLoader__.load({
       ".dsh-remote-empty{display:flex;align-items:center;justify-content:center;min-height:140px;padding:12px;border:1px dashed var(--dsw-alias-border-l2,#36373b);border-radius:12px;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-size:13px;text-align:center}" +
       ".dsh-remote-hint{font-size:11px;line-height:14px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}" +
       ".dsh-remote-pathbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}" +
+      ".dsh-remote-hostswitch{flex:none;min-width:180px;max-width:220px}" +
       ".dsh-remote-path{flex:1;min-width:0;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary,#b8b8b8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}" +
       ".dsh-remote-list{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto}" +
       ".dsh-remote-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:13px;line-height:18px;text-align:left;cursor:pointer}" +
@@ -956,7 +968,7 @@ window.__ModuleLoader__.load({
       var testResult = state.testResult && state.testResult.id === id ? state.testResult : null;
       var auth = displayAuthType(host);
       var secretSet = isHostSecretSet(state.secrets, id);
-      var addr = host.host + (host.port && host.port !== 22 ? ":" + host.port : "") + " · " + host.user;
+      var addr = maskHostAddress(host.host) + (host.port && host.port !== 22 ? ":" + host.port : "") + " · " + host.user;
       var authLabel = auth === 'password'
         ? (t("field.authPassword") + (secretSet ? " · " + t("passwordSet") : ""))
         : t("field.authKey");
@@ -1232,7 +1244,7 @@ window.__ModuleLoader__.load({
         React.createElement("div", { className: "dsh-hosts" },
           React.createElement("div", { className: "dsh-hosts-header" },
             React.createElement("div", null,
-              React.createElement("div", { className: "dsh-hosts-title" }, React.createElement(IconGlobeOutline14, { size: 14 }), React.createElement("span", { style: { marginLeft: 6 } }, t("title"))),
+              React.createElement("h2", { className: "dsh-hosts-title" }, t("title")),
               React.createElement("div", { className: "dsh-hosts-intro" }, t("intro"))
             ),
             state.form ? null : React.createElement(Button, {
@@ -1909,13 +1921,29 @@ window.__ModuleLoader__.load({
             }, inner);
           }));
         }
-        // Explicit "current host" indicator (avoids losing track when many hosts exist).
         var curHostTitle = '';
         for (var ci = 0; ci < hosts.length; ci++) {
           if (String(hosts[ci].id) === String(hostId)) { curHostTitle = hosts[ci].title; break; }
         }
+        // Host switcher: when more than one host is configured show a SelectMenu so the
+        // user can switch hosts mid-browse (re-browses the newly chosen host). A single
+        // host stays a static pill as the "current host" label.
+        var hostSwitcher;
+        if (hosts.length > 1) {
+          var switchOptions = hosts.map(function (h) { return { value: h.id, label: h.title }; });
+          hostSwitcher = React.createElement('div', { className: 'dsh-remote-hostswitch' },
+            React.createElement(SelectMenu, {
+              value: hostId,
+              disabled: loading || adopting,
+              options: switchOptions,
+              onChange: function (id) { selectHost(id); }
+            })
+          );
+        } else {
+          hostSwitcher = curHostTitle ? React.createElement(Pill, { active: true, className: 'dsh-remote-hostpill' }, curHostTitle) : null;
+        }
         var pathBar = React.createElement('div', { className: 'dsh-remote-pathbar' },
-          curHostTitle ? React.createElement(Pill, { active: true, className: 'dsh-remote-hostpill' }, curHostTitle) : null,
+          hostSwitcher,
           React.createElement('span', { className: 'dsh-remote-path', title: cwd }, cwd),
           React.createElement(Button, { variant: 'ghost', size: 'sm', disabled: loading || adopting, onClick: goHome }, t('home')),
           React.createElement(Button, { variant: 'ghost', size: 'sm', disabled: stack.length === 0 || loading || adopting, onClick: goBack }, t('back'))
@@ -1987,9 +2015,6 @@ window.__ModuleLoader__.load({
       var decidingState = React.useState(false);
       var deciding = decidingState[0];
       var setDeciding = decidingState[1];
-      var fromMemoryState = React.useState(false);
-      var fromMemory = fromMemoryState[0];
-      var setFromMemory = fromMemoryState[1];
       var generation = React.useRef(0);
       var reported = React.useRef(false);
       var adoptingRef = React.useRef(false);
@@ -2028,10 +2053,8 @@ window.__ModuleLoader__.load({
         if (remembered === 'local' || remembered === 'remote') {
           setTab(remembered);
           setDeciding(false);
-          setFromMemory(true);
           return;
         }
-        setFromMemory(false);
         setDeciding(true);
         setTab(null);
         Promise.resolve().then(function () { return props.listHosts(); }).then(function (response) {
@@ -2116,7 +2139,6 @@ window.__ModuleLoader__.load({
         className: 'dsh-remote-dialog',
         children: React.createElement('div', { className: 'dsh-flow' },
           tabBar,
-          fromMemory ? React.createElement('div', { className: 'dsh-remote-hint' }, t('tab.defaultHint')) : null,
           body)
       });
     }

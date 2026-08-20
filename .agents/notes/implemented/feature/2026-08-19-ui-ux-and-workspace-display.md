@@ -12,12 +12,17 @@ Status: implemented
   - B:文案重写(zh/en 对称各 48 键),黑话清零(sshd/exec/SFTP/占位/命名空间…不再进用户文案)。
   - C:状态组件收敛为官方 `StatusNote`(StateDot)+ 删除确认改官方 Modal + 表单内测试连接 + 空态 CTA/错误重试;原生下拉框改官方 Menu 组件(SelectMenu),「添加」按钮防换行。
 - 全部新样式走 `--dsw-alias-*` 主题 token(DSH 无 state-info-*/accent token,用 brand-primary / state-business-primary 蓝),深/浅色主题自适应。
+- **D: 远程页签多主机切换**:配置主机数 >1 时,远端浏览阶段的 pathbar 用官方 `SelectMenu` 呈现主机切换器(取代之前的只读 Pill),选中即 `selectHost(id)` → `resolveRemoteHome` 重新列该机家目录;单主机时保持 Pill 作为「当前主机」标识(`.dsh-remote-hostswitch` 容器限宽 180–220px 防挤压路径)。
+- **E: 移除「上次使用:远程」提示**:删除弹窗顶部 `tab.defaultHint` 提示元素及为之存在的 `fromMemory` 状态/逻辑,并移除 ZH/EN 对应 locale key——本地与远端页签都不再显示该提示。
+- **F: 设置详情页标题纯文字化**:标题由「地球 icon+远程主机」改为纯文字 `h2`「SSH 连接」,CSS 对齐官方设置详情标题(`dsh-client-ui-settings-models` ModelsSection 的 h2.title:16px/500/24px,不另创字号);移除详情标题上的地球 icon(`IconGlobeOutline14` 随之删除)。
+- **G: 主机列表地址展示脱敏**:新增 `maskHostAddress`(仅展示层)——保留地址首尾点分段、中间每段替换为 `***`(如 `49.***.***.93`;hostname 同理,≤2 段时原样返回),应用到 HostRow 的地址行;存储与建连仍用完整 `host.host`。
 
 ## Alternatives considered
 - 方案 A1-A2 持久化到 settings 命名空间(设计文档原意):受 api.settings 白名单 + 不改 src/ 双重限制 → 降级 localStorage(键 dsh-ssh.ui.*),记录备查。
+- **设置侧栏项地球 icon(需求 3)不可纯附加实现**:设置面板侧栏图标由官方 shell `dsh-client-ui-settings-general` 的 `navIcon(id)` 按 id 硬编码(models/agent-presets/plugins 特判,其余回退齿轮 icon),`settings.section` 注册只投影 `{id,order,label}`、无 icon 挂钩,也无 nav-icon 槽位可覆写;导航文案「SSH 连接」本就正确。改为地球 icon 需改 core 的 navIcon → 违反「DSH core 零修改」红线,未实施(待用户裁决是否放宽/在 fork 实现)。
 
 ## Consequences
-- 多主机一眼可辨身份;个性化标题不被强改写。bash 卡片与 read/write 卡片(透传远端绝对路径,本就不显示 base64)行为一致。
+- 多主机一眼可辨身份,浏览中可随时切换主机重列目录;个性化标题不被强改写。bash 卡片与 read/write 卡片(透传远端绝对路径,本就不显示 base64)行为一致。
 - 真机渲染依赖 GUI 重启后核验(user/主代理统一验证)。
 
 ## 出处
