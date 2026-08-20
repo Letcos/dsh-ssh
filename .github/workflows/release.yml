@@ -37,6 +37,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm 必须先于 setup-node: setup-node 的 cache: pnpm 需要 pnpm 已在 PATH。
+      # 版本锁定在 root package.json 的 packageManager 字段 (pnpm@11.21.0)。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+          run_install: false
+
       # node 22+ 满足仓库引擎要求; registry-url 指向 npmjs 是关键 ——
       # setup-node 会据此把 NODE_AUTH_TOKEN 写入 $HOME/.npmrc 供 npm publish 使用。
       - name: Setup Node.js
@@ -45,14 +53,6 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: pnpm
-
-      # 仓库根有 pnpm-workspace.yaml, 版本锁定在 root package.json 的
-      # packageManager 字段 (pnpm@11.21.0)。
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11.21.0
-          run_install: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
