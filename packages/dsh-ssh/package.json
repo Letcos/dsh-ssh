@@ -1,6 +1,6 @@
 {
   "name": "@dsh-ssh/dsh-ssh",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "SSH remote workspace for DeepSeek Harness: host plugin bundle (M2a ssh-core+settings, M2b settings-page UI + testConnection remote)",
   "type": "module",
   "main": "index.js",
