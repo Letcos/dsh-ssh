@@ -94,7 +94,7 @@ DSH is fully restored — no trace left behind.
 
 ## Development
 
-This repository is a pnpm workspace; developer-oriented documentation lives in `packages/dsh-ssh/`. See [packages/dsh-ssh/README.md](./packages/dsh-ssh/README.md) for the package layout, tests, and live verification scripts.
+This repository is a pnpm workspace; developer-oriented documentation lives in `packages/dsh-ssh/`. See [packages/dsh-ssh/CONTRIBUTING.md](./packages/dsh-ssh/CONTRIBUTING.md) for the package layout, tests, and live verification scripts.
 
 ## License
 

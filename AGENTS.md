@@ -35,7 +35,8 @@ dsh-ssh/
 └── packages/dsh-ssh/                # 全部实现(@dsh-ssh/dsh-ssh, plain JS, 无构建)
     ├── index.js / tools.js / client.js
     ├── src/  lib/  scripts/  test/
-    └── README.md                    # 脚本清单与「测试」章节
+    ├── README.md                    # 产品页（面向用户）
+    └── CONTRIBUTING.md              # 开发者文档（脚本清单与「测试」章节）
 ```
 
 ## 3. 常用命令
@@ -99,7 +100,7 @@ dsh --profile dsh-ssh-dev --dump-config     # 校验 patch 是否进入组合
 
 ## 6. 参考(精简)
 
-- **项目说明**: `README.md`; 包内脚本与测试详见 `packages/dsh-ssh/README.md`。
+- **项目说明**: `README.md`; 包内脚本与测试详见 `packages/dsh-ssh/CONTRIBUTING.md`。
 - **官方文档**(VitePress, 根 locale 即简体中文): https://deepseek-harness.github.io/deepseek-harness/
   - 开发入门: https://deepseek-harness.github.io/deepseek-harness/develop/basic/
   - 能力接缝总览: https://deepseek-harness.github.io/deepseek-harness/reference/capability-seams

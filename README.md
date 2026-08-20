@@ -94,7 +94,7 @@ DSH 完全复原，不留痕迹。
 
 ## 开发
 
-本仓库是 pnpm workspace；面向开发者的文档在 `packages/dsh-ssh/`。包结构、测试与真机验证脚本见 [packages/dsh-ssh/README.md](./packages/dsh-ssh/README.md)。
+本仓库是 pnpm workspace；面向开发者的文档在 `packages/dsh-ssh/`。包结构、测试与真机验证脚本见 [packages/dsh-ssh/CONTRIBUTING.md](./packages/dsh-ssh/CONTRIBUTING.md)。
 
 ## License
 
