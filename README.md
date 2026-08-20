@@ -3,7 +3,7 @@
 中文 | [English](README.en.md)
 
 [![npm version](https://img.shields.io/npm/v/@dsh-ssh/dsh-ssh)](https://www.npmjs.com/package/@dsh-ssh/dsh-ssh)
-[![license](https://img.shields.io/npm/l/@dsh-ssh/dsh-ssh)](./LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 通过 SSH 把 DeepSeek Harness 的工作区放到任意一台远端机器上 —— 直接在 DSH 设置页里配置主机、把它某个目录选成工作区，之后所有 bash / 文件 / 搜索工具调用都在那台机器上执行，而不是在你本机。
 

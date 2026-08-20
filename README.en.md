@@ -3,7 +3,7 @@
 [中文](README.md) | English
 
 [![npm version](https://img.shields.io/npm/v/@dsh-ssh/dsh-ssh)](https://www.npmjs.com/package/@dsh-ssh/dsh-ssh)
-[![license](https://img.shields.io/npm/l/@dsh-ssh/dsh-ssh)](./LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 Run your DeepSeek Harness workspace on any remote machine over SSH — right from the DSH settings page. Configure a host, pick one of its directories as a workspace, and every bash / file / search tool call runs on that machine instead of your own.
 
