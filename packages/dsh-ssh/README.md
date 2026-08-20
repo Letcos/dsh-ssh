@@ -34,8 +34,9 @@
 ## 安装
 
 ```bash
-dsh plugin add @dsh-ssh/dsh-ssh
+dsh plugin --profile web add @dsh-ssh/dsh-ssh
 ```
+若 pnpm 报 `ERR_PNPM_ADDING_TO_ROOT`，在命令末尾加 `-w`（profile 目录是 pnpm workspace 根，pnpm 11 需要显式允许）。安装时若看到 `cpu-features` 编译失败的日志属正常——它是可选的原生加速依赖，失败会自动回退纯 JS 实现，不影响功能。
 
 重启 DSH，在设置页添加你的第一台主机。
 
@@ -88,7 +89,7 @@ dsh plugin add @dsh-ssh/dsh-ssh
 
 **如何卸载？**
 ```bash
-dsh plugin remove @dsh-ssh/dsh-ssh
+dsh plugin --profile web remove @dsh-ssh/dsh-ssh
 ```
 DSH 完全复原，不留痕迹。
 

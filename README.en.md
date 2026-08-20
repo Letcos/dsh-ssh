@@ -34,8 +34,9 @@ Run your DeepSeek Harness workspace on any remote machine over SSH — right fro
 ## Install
 
 ```bash
-dsh plugin add @dsh-ssh/dsh-ssh
+dsh plugin --profile web add @dsh-ssh/dsh-ssh
 ```
+If pnpm reports `ERR_PNPM_ADDING_TO_ROOT`, append `-w` (profile dirs are pnpm workspace roots and pnpm 11 requires the flag). A failed `cpu-features` build log during install is expected — it is an optional native accelerator and falls back to pure JS.
 
 Restart DSH, then open the settings page and add your first host.
 
@@ -88,7 +89,7 @@ No. Tool routing is independent of presets and works with the standard preset.
 
 **How do I uninstall?**
 ```bash
-dsh plugin remove @dsh-ssh/dsh-ssh
+dsh plugin --profile web remove @dsh-ssh/dsh-ssh
 ```
 DSH is fully restored — no trace left behind.
 
