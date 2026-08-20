@@ -767,7 +767,7 @@ window.__ModuleLoader__.load({
       ".dsh-hosts-header{display:flex;align-items:center;justify-content:space-between;gap:8px}" +
       // Mirrors the official settings section title (e.g. Models) so the heading
       // reads at the same size/weight as the built-in settings detail pages.
-      ".dsh-hosts-title{margin:0;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:16px;font-weight:500;line-height:24px}" +
+      ".dsh-hosts-title{margin:0;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:18px;font-weight:600}" +
       ".dsh-hosts-intro{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}" +
       ".dsh-hosts-error{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-radius:10px;color:var(--dsw-alias-state-error-primary,#ef4444);background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 30%,transparent);font-size:12px;line-height:16px;word-break:break-word}" +
       ".dsh-hosts-empty{display:flex;align-items:center;justify-content:center;min-height:120px;border:1px dashed var(--dsw-alias-border-l2,#36373b);border-radius:12px;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-size:13px}" +
