@@ -1,0 +1,7 @@
+# @dsh-ssh/dsh-ssh bundle patch: inserts its own host plugin row so
+# `dsh plugin --profile <name> add <path>` activates it as a profile layer.
+- insert:
+    - id: '@dsh-ssh/dsh-ssh'
+      name: '@dsh-ssh/dsh-ssh'
+      config:
+        maxConnections: 4

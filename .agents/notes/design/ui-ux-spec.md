@@ -1,0 +1,398 @@
+# @dsh-ssh/dsh-ssh 插件 UI/UX 设计规范
+
+> 纯设计文档（不改代码、不重启服务）。供实施子代理逐条执行。
+> 适用范围：`packages/dsh-ssh/client.js` 的两个 UI 面 ——
+> ① 设置页「SSH 连接」区块（`SshHostsSection` 系列组件）
+> ② 新建会话/侧栏的「选择工作区」弹窗（`DirectoryFlowCombined` 系列组件，priority -1 覆盖官方槽）。
+> 全部可改范围 = `client.js`（plain JS + React，无构建）+ 它的内联 CSS 常量。core 只读。
+>
+> **指导思想**：面向「开发者把一台远地 Linux 机当工作区、跑 agent」的业务语言，不暴露实现黑话；视觉与 DSH 官方风格一致，全部落在 `@deepseek-ai/dsh-client-ui-primitives` 能力内。
+
+---
+
+## 0. 执行摘要
+
+| 项 | 结论 |
+|---|---|
+| **默认体验推荐方案** | **方案 C（按已配主机数智能默认 tab + 不自动弹系统对话框 + 记住上次选择）**。见 §3。 |
+| **文案改动量** | 全部用户可见文案重写：设置页 + 工作区弹窗，ZH/EN 双份约 **130 条**全部重拟（含少量新增 key）。见 §4 文案对照表。 |
+| **主要改动文件** | `packages/dsh-ssh/client.js`：locale 对象（ZH/EN/SSH_ZH/SSH_EN）+ `DirectoryFlowCombined` 默认 tab 逻辑 + 若干样式/组件微调。全部为纯附加/替换，无新增依赖。 |
+| **视觉基准** | `--dsw-alias-*` token + 官方原子组件（`Button/Input/Modal/Pill/Menu/StateDot/Toast/Tooltip/RiskConfirmation` 等）已足够支撑全部设计，**无需引入任何新组件或 CSS 框架**。 |
+
+---
+
+## 1. 现状清单（信息架构与动线）
+
+### 1.1 实现载体
+
+- 唯一 UI 文件：`packages/dsh-ssh/client.js`（~81KB，plain JS + React，`window.__ModuleLoader__.load` 自包含；`require` 仅解析 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`）。
+- 样式：文件内 `var CSS = "…"` 字符串常量，注入 `<style>`（`data-plugin-css="@dsh-ssh/dsh-ssh/client.css"`），全部走 `--dsw-alias-*` 设计 token。
+- 文案：`ZH`/`EN` 注册到 locale 命名空间 `settings.ssh`；`SSH_ZH`/`SSH_EN` 注册到 `workspace.ssh`。
+- 槽位注册：
+  - `settings.section`（id `ssh-hosts`，order 40，label=`nav`，locale `settings.ssh`）→ `SshHostsSection`（client.js L1596-1605）。
+  - `conversation.hero.workspace.directoryFlow` 与 `sidebar.workspaces.directoryFlow`，**priority -1** 双槽覆盖官方默认（priority 0）→ `DirectoryFlowCombined`（client.js L1641-1654）。
+
+### 1.2 组件清单与职责（client.js）
+
+| 组件 | 行号 | 职责 |
+|---|---|---|
+| `SshHostsSection` | L793 | 设置页区块：标题/描述/「添加」按钮/错误条/主机列表体/删除确认条 |
+| `HostRow` | L645 | 单台主机行卡片：名称+地址子行+认证 pill + 「测试/编辑/删除」按钮 + 内联测试结果 |
+| `HostTestResult` | L623 | 测试连接结果条（成功/失败的着色 + 关闭钮） |
+| `HostForm` | L727 | 添加/编辑主机表单：字段网格（名称/主机/端口/用户/认证方式/密钥路径或口令）|
+| `Field` | L695 | 单个字段外壳：label + input/select + 错误提示 |
+| `DirectoryFlowCombined` | L1431 | 工作区选择弹窗 owner：`Modal` + 双 tab（本地/远程）+ 子 body 分派 |
+| `LocalFlowBody` | L890 | 本地页签：本地目录浏览（listDirectory/createDirectory）或 native 系统对话框回退 |
+| `RemoteFlowBody` | L1168 | 远程页签：主机列表 → 远端目录浏览（listHosts/listRemoteDir/resolveRemoteHome/createPlaceholder）|
+
+### 1.3 设置页「SSH 连接」现状动线
+
+```
+设置页 → （设置页自带 nav 列表）点击「SSH 连接」
+  → 区块头：🌐 SSH 连接（title） + 描述（intro）[右]「+ 添加」按钮
+  ├─ 空状态：虚线框「还没有主机 — 点击「添加」开始。」（hosts-empty）
+  ├─ 有主机：主机卡片列表（每张卡：名称 / host:port·user [认证 pill] / [测试][编辑][删除]）
+  │    └─ 「测试」→ 按钮转「测试中…」（loading 图标）→ 卡下内联结果条（✅连接成功 / ⚠️连接失败: <错误>，可关闭）
+  └─ 「+ 添加」→ 内联表单折叠展开 HostForm
+       └─ 表单底部 [取消][保存=添加] / 编辑时 [取消][保存]
+            └─ 校验错误字段下红字（必填/不能含空格/1–65535）
+       └─ 删除：卡片行下弹出红色删除确认条「🗑 删除该主机? / 只移除本机配置, 不会影响远端。[取消][确认删除]」
+```
+
+### 1.4 工作区选择弹窗现状动线（DirectoryFlowCombined）
+
+```
+新建会话（或侧栏工作区）→ 触发 directoryFlow
+  → Modal「选择工作区目录」 title + intro 描述
+    → tab 栏：[本地] [远程主机]   ← 默认『本地』（client.js L1439: useState('local')）
+      ├─ 本地页签：挂载即 list(undefined)（listDirectory）
+      │     ├─ 有 browse 能力 → 目录列表（家目录/上级/新建文件夹/打开/取消）
+      │     └─ browse 能力缺失（native-only）→ 立即 fireNativePick() → **自动弹系统目录对话框**
+      │           （取消→整个弹窗关闭；选中→直接 onPicked → 走正式建流）
+      └─ 远程页签：载入主机列表
+            ├─ 空：无主机提示「还没有配置主机 — 请先到「SSH 连接」设置页添加。」
+            └─ 选主机 → 解析家目录 → 远端目录列表（主机/家目录/返回/重试/使用此目录/取消/新建）
+                  └─ 选「使用此目录」→ createPlaceholder → 本地占位目录 → onPicked
+```
+
+### 1.5 用户价值动线（目标：配主机→选远端目录→跑会话）
+
+```
+一次配置：设置页添加主机（名称/地址/端口/用户名/认证）→ 测试连接 → 保存
+日常使用：新建会话 → 选「远程主机」→ 选主机 → 进入远端目录 → 「使用此目录」
+         → 会话 cwd 指向远端占位目录，之后 bash/读写/glob/grep 全走远端
+多主机：用户往往配 1~N 台，日常绝大多数打开弹窗就是要选远端。
+```
+
+---
+
+## 2. 现状体验痛点清单（逐条）
+
+> 依据 §1 现状逐条核对。每条标注「文案」「交互」「视觉」类别，供实施直接对号入座。
+
+### 2.1 文案黑话/不通顺（用户恳请重写，重点）
+
+| # | 现状原文（ZH） | 组件/位置 | 问题 |
+|---|---|---|---|
+| C1 | intro "配置可连接的另一台机器(仅依赖远端 sshd 的 exec/SFTP)。口令为只写字段, 留空表示保持不变。" | 设置页 | **技术黑话外露**（`sshd`/`exec`/`SFTP`/`只写字段`），对普通开发者无意义；括号解释更像实现注释。 |
+| C2 | intro (工作区) "选中远端目录会在本地自动创建**占位目录**。" | 弹窗 | 「占位目录」是实现词；应描述成"把远端目录作为工作区"的正向价值。 |
+| C3 | `using` "创建占位…" / `placeholderFailed` "创建本地占位目录失败" | 远程页签按钮/错误 | 「占位」外露。 |
+| C4 | `unavailable` "设置命名空间不可用(宿主未注册 dssh-hosts)" / `loadError` "读取设置失败" | 设置页错误 | `dssh-hosts`/`命名空间` 纯实现黑话，用户无法理解也无法行动。 |
+| C5 | `local.nativeHint` "当前环境未启用目录浏览，已切换到系统目录选择器。" | 本地页签 | 「目录浏览」「系统目录选择器」技术腔；且这是**用户被打断时才出现**的文案。 |
+| C6 | `err.conflict` "配置已在其他会话被修改, 请刷新后重试" | 设置页错误 | 半黑话、且无恢复引导。 |
+| C7 | `field.authKey` "密钥 (SSH key)" | 表单 | `SSH key` 冗余中英重复。 |
+| C8 | `passwordSet` "已设置(留空保持不变)" 及 HostRow 里 `t("passwordSet").split("(")[0]` | 表单/pill | 把带上括号的字符串当数据再 `split`，脆且难看。 |
+| C9 | `local.open` "打开" 与 `use` "使用此目录" | 本地/远程页签 | 「打开」/「使用此目录」不对称、语义弱。 |
+| C10 | `empty` "还没有主机 — 点击「添加」开始。" | 设置页空状态 | 只说了"没有"，没说价值/为什么要有主机。 |
+| C11 | `noHosts` "还没有配置主机 — 请先到「SSH 连接」设置页添加。" | 远程 tab 空状态 | 路径给对了但文案机械。 |
+
+### 2.2 交互缺陷
+
+| # | 问题 | 位置 |
+|---|---|---|
+| I1 | **默认 tab 永远为「本地」**，且本地页签在 native-only 环境挂载即**自动弹系统目录对话框**——用户很可能装了这插件就是要用远端，打开弹窗却被系统文件选择器打断（还可能误以为出 bug）。见 §3。 | 弹窗 owner L1439 / LocalFlowBody |
+| I2 | 测试连接结果**只在卡片下方内联短暂展示**，无成功后的持久正向反馈 + 无 toast；失败详情有时是极长错误串。 | HostRow/HostTestResult |
+| I3 | 删除用**内联红色确认条**而非标准 `RiskConfirmation`/Modal，样式 divergent。 | SshHostsSection |
+| I4 | 认证方式下拉**曾用原生 `<select>`**，已被另一子代理用官方 `Menu` 组件（`SelectMenu`，client.js 现 L705-750）替换（A.23）。本文档不再涉及实现，仅 `field.auth*` 文案与之协同。 | Field |
+| I5 | 「新建文件夹」与「打开」操作挤在单一 pathbar 行 + 底部 action 行，层级不清；远程页签没有显式的"当前主机"标签，多主机时易迷失。 | LocalFlowBody/RemoteFlowBody |
+| I6 | 保存/删除/测试的**过程态**只有按钮 disabled + 一个 loading 图标，缺少统一"进行中"视觉语言（可用 `StateDot ongoing`）。 | 多处 |
+| I7 | **表单内无法先测试再保存**：测试连接按钮只存在于「已保存的主机行」上，添加/编辑表单内没有测试按钮 —— 用户必须先保存→列表行→点测试→失败→再回编辑，往返繁琐。 | HostForm / HostRow |
+| I8 | 远程 tab 选主机阶段 `loadHostsFailed` 只在空态提示「读取主机列表失败」，**无重试按钮**（browse 阶段才有 retry），失败即死胡同。 | RemoteFlowBody |
+| I9 | 远程浏览没有显式「当前主机」标识，多主机时用户不知道正连哪台。 | RemoteFlowBody |
+
+### 2.3 视觉/一致性
+
+| # | 问题 |
+|---|---|
+| V1 | 部分行距/字号硬编码，但官方 browse picker 用 row 高 28px、圆角 6px、`--dsw-alias-interactive-bg-*`——需对齐官方 token 语义（见 §5）。 |
+| V2 | 删除确认条样式自行实现，官方有 `RiskConfirmation` 未复用。 |
+| V3 | 测试结果/错误条重复造 `.dsh-test/.dsh-hosts-error/.dsh-remote-error` 三套近似样式，建议收敛为一个语义状态组件。 |
+
+### 2.4 绕过 locale 的硬编码文案（EN 环境也会显示中文/内部串，需一并收口）
+
+| # | 位置 | 现状 | 建议 |
+|---|---|---|---|
+| H1 | L1300 | `loadDirFailed + ": resolveRemoteHome 返回异常"`（含方法名、无 EN） | 改为「无法读取远端文件夹（远程返回异常）」并用 locale |
+| H2 | L435 / L1547 | 「远程服务挂载失败: …」（硬编码中文） | 入 locale（`settings.ssh` 新增 key `mountFail`） |
+| H3 | L1535 | `remoteError()`「远程服务未就绪…」 | 入 locale |
+| H4 | L770 | 端口占位符硬编码 `"22"` | 可接受（数字），不强求 |
+| H5 | L62/L92 `banner`、`testDone` | **死文案**（定义未用） | 删除或归档 |
+
+> 附注：原生 `<select>`（I4）与「添加」按钮折行问题由**其他两个子代理**负责；`field.auth` 下拉项文案走 §4 的 `field.authKey/authPassword`，其余视觉规范见 §5。
+
+---
+
+## 3. 「添加工作区默认体验」优化方案
+
+### 3.1 问题本质
+
+- 用户打开「选择工作区」弹窗，**默认落点在本地 tab**（L1439）；而 target user 是"装插件就是要用远端"。
+- 更糟的是在 **native-only 环境**，本地 tab 挂载即 `fireNativePick()` → `ctx.workspaces.pickDirectory()` **自动弹出系统文件对话框**，覆盖在插件弹窗之上，打断流程、造成困惑（I1/C5）。这是"默认本地 + 自动弹资源管理器"组合导致的核心体验事故。
+- 结论：问题不在"有没有文件浏览器"，而在**默认倾向与"打断式弹窗"**。
+
+### 3.2 三个候选方案
+
+#### 方案 A —— 默认 tab 给「远程主机」，关闭自动弹窗
+- 改动：`useState('local')` → `useState('remote')`；`LocalFlowBody` 挂载不再自动 `fireNativePick`，改为只在用户**显式切到本地 tab 且 native-only** 时弹一次。
+- 优点：改动极小（约 2 处），直接命中"大多数用户要远端"。
+- 缺点：不智能——对**确实只用本地**的用户是倒退；没利用"已配了几台主机"信号；不记住用户偏好。
+- 适合：应急 / 最小改动。**不推荐作为最终**，可作为过渡。
+
+#### 方案 B —— 记住上次选择（持久化 tab 记忆）
+- 改动：把上次活动 tab（`local`/`remote`，甚至上次选中的**主机 id**）写入 `ctx.settings`（hosts namespace 的一个 `ui` 字段），下次打开恢复。
+- 优点：贴合个体习惯，对本地/远端都好；比 A 智能。
+- 缺点：首次无记忆时仍需一个默认；要动 settings 持久化（新增字段，风险低）。
+
+#### 方案 C —— 按已配主机数智能默认 + 记住上次选择 + 绝不自动弹系统对话框（推荐）
+- 规则：
+  - **已配主机数 > 0**（`listHosts` 非空）→ 默认 tab = **远程主机**（大概率要连远端）；否则 → 本地。
+  - **记住上次选择**：把用户上次手动切的 tab（remote 可再记 hostId）持久化，优先恢复。
+  - **本地页签取消"自动弹系统对话框"**：native-only 时不再挂载即弹；改为本地 tab 空态里放一个显式的「选择本机文件夹…」按钮，点了才弹；并给说明文案。
+- 优点：覆盖全部场景——老用户记住偏好、新用户按主机数推断、被打断问题彻底消除。
+- 缺点：实现比 A/B 略多几行（默认 tab 需等 `listHosts` 异步回来再定）。风险可控。
+
+### 3.3 推荐与取舍
+
+**推荐方案 C**，理由：
+1. 直接解决"打断式弹窗"——**任何情况下都不自动弹系统对话框**，由用户主动触发，这是必须守住的底线（无论 A/B/C 都应含此项）。
+2. 默认 tab 用**主机数信号**推断，比"永远远端"稳妥；0 主机时自然落本地避免空转。
+3. 记住上次 tab + host，长期体验最顺滑。
+4. 所有改动都在 `DirectoryFlowCombined`/`LocalFlowBody` 内 + 一个 settings 持久化字段，不碰 core、不加依赖。
+
+副作用与兜底：
+- 默认 tab 需等 `listHosts` 异步结果，owner 在渲染 tab 前异步求得（初始 `null`，挂载后按主机数/记忆 set，未定前给轻 loading）。
+- 记忆字段独立命名（如 `dsh-ssh.ui.lastWorkspaceTab`），放在 hosts namespace 的 UI 侧，避免污染主机配置校验。
+
+---
+
+## 4. 文案系统重设计（ZH 权威，EN 同步）
+
+### 4.0 写作原则
+
+- **业务语言**：这是"配置远程机器、把它的目录当工作区跑 agent"的 UI。文案围绕价值，不解释实现。
+- **不暴露黑话**：`sshd`/`exec`/`SFTP`/`占位目录`/`命名空间`/`dssh-hosts`/`只写字段` 等一律不出现（最多在 tooltip 里藏底层原因，且用人类语言）。
+- **统一动词**：本地 tab 与远程 tab 的确认动作统一为「**打开**」→ 收起 C9 的不对称。
+- **状态词统一**：连接「测试中 / 可用 / 不可用」；保存「保存中 / 已保存」；删除「删除 / 仅移除本机配置，远端不受影响」。
+- **可行动**：错误/空状态都给"下一步做什么"。
+
+> 下表 **key 与现有一致**（改动量最小），值的重写 + 少量新增 key。`→` 表示新增。
+
+### 4.1 设置页「SSH 连接」（`settings.ssh`：ZH + EN）
+
+| key | 现状 ZH | **新 ZH** | **新 EN** | 说明 |
+|---|---|---|---|---|
+| nav | SSH 连接 | SSH 连接 | SSH Connections | 不变 |
+| title | SSH 连接 | 远程主机 | Remote Hosts | 用「主机」，与工作区 tab 对齐 |
+| intro | 配置可连接的另一台机器(仅依赖远端 sshd 的 exec/SFTP)。口令为只写字段, 留空表示保持不变。 | 把另一台机器的目录作为工作区。添加主机后，即可在其中创建会话，命令、文件与搜索都会在该机器上执行。口令留空表示沿用已保存的值。 | Add machines to use a folder on them as a workspace. Once added, sessions run there — commands, files, and search all execute on that machine. Leave the password blank to keep the saved value. | 黑话清零，讲价值 |
+| add | 添加 | 添加主机 | Add host | 更明确 |
+| edit | 编辑主机 | 编辑 | Edit | —— |
+| save | 保存 | 保存 | Save | 不变 |
+| cancel | 取消 | 取消 | Cancel | 不变 |
+| delete | 删除 | 删除 | Remove | 与确认动词语义一致 |
+| test | 测试连接 | 测试连接 | Test connection | 不变 |
+| testing | 测试中… | 正在测试… | Testing… | 节奏一致 |
+| testOk | 连接成功 | 已连接 · 可以开始会话 | Connected · ready | 正向、明确下一步 |
+| testFail | 连接失败 | 连接失败 | Connection failed | 不变 |
+| banner | 远端 banner | 标识(可选) | Label (optional) | 「banner」黑话 |
+| confirmDelete | 删除该主机? | 删除主机「{name}」? | Remove “{name}”? | 带名字；`{name}` 为插值占位 |
+| confirmDeleteHint | 只移除本机配置, 不会影响远端。 | 仅移除本机配置，远端机器不受影响，也不会删除其上的任何文件。 | This only removes the local config. The remote machine is untouched and no files are deleted. | 更安心 |
+| confirmDeleteAction | 确认删除 | 删除 | Remove | —— |
+| field.name | 名称 | 名称 | Name | 不变 |
+| field.namePh | 如: 我的工作站 | 例如：我的工作站 | e.g. My workstation | 标点统一 |
+| field.host | 主机 | 地址 | Address | 「主机」易与"主机卡片"混淆 |
+| field.hostPh | host 或 IP | IP 或域名 | IP or hostname | 人类语言 |
+| field.port | 端口 | 端口 | Port | 不变 |
+| field.user | 用户 | 用户名 | Username | —— |
+| field.userPh | 登录用户名 | 登录用户名 | SSH login user | —— |
+| field.auth | 认证方式 | 认证方式 | Authentication | 不变 |
+| field.authKey | 密钥 (SSH key) | SSH 密钥 | SSH key | 去重复 |
+| field.authPassword | 口令 | 密码 | Password | 与 host 侧统一用「密码」 |
+| field.keyPath | 私钥路径 | 私钥路径 | Private key path | 不变 |
+| field.keyPathPh | 如 ~/.ssh/id_ed25519; 留空走 ssh-agent | 如 ~/.ssh/id_ed25519；留空使用 ssh-agent | e.g. ~/.ssh/id_ed25519; empty uses ssh-agent | 标点统一 |
+| field.password | 口令(只写) | 密码 | Password | 去掉「只写」黑话 |
+| field.passwordPh | 新口令; 留空保持不变 | 新密码；留空使用已保存的值 | New password; empty keeps the saved one | —— |
+| passwordSet | 已设置(留空保持不变) | 已保存(留空沿用) | Saved (empty keeps it) | 去掉依赖 split 的脆写法 |
+| err.required | 必填 | 此项必填 | Required | —— |
+| err.noSpaces | 不能包含空格 | 地址不能包含空格 | No spaces allowed | —— |
+| err.range | 1–65535 | 端口需在 1–65535 | Port must be 1–65535 | —— |
+| err.conflict | 配置已在其他会话被修改, 请刷新后重试 | 主机配置已在其他位置被修改。请重新加载后重试。 | This host was changed elsewhere. Reload and try again. | 可行动 |
+| empty | 还没有主机 — 点击「添加」开始。 | 还没有主机。添加一台机器，就能把它的目录当工作区使用。 | No hosts yet. Add a machine to use one of its folders as a workspace. | **价值导向空状态** |
+| loading | 加载中… | 正在加载… | Loading… | —— |
+| loadError | 读取设置失败 | 无法读取配置，请稍后重试。 | Couldn’t load config. Please try again. | —— |
+| saveError | 保存失败 | 保存失败，请重试。 | Failed to save. Please retry. | —— |
+| deleteError | 删除失败 | 删除失败，请重试。 | Failed to remove. Please retry. | —— |
+| unavailable | 设置命名空间不可用(宿主未注册 dssh-hosts) | 无法读取配置，请检查插件是否已启用。 | Config unavailable — check that the add-on is enabled. | 黑话清零 |
+| readonly | 当前设置不可写(只读) | 当前不可修改（只读）。 | Read-only — cannot be modified here. | —— |
+| testDone | 测试完成 | 已测试 | Tested | 保留兼容 |
+| **→ saved** | — | 已保存 | Saved | 保存成功 toast（新增） |
+| **→ empty.first** | — | 首次使用？先添加主机，再从新建会话里选它的目录。 | First time? Add a host, then pick one of its folders when creating a session. | 空状态副引导（新增） |
+
+### 4.2 工作区选择弹窗（`workspace.ssh`：SSH_ZH + SSH_EN）
+
+| key | 现状 ZH | **新 ZH** | **新 EN** | 说明 |
+|---|---|---|---|---|
+| title | 选择工作区目录 | 选择工作区目录（**保持与官方 picker 一致**） | Select Workspace Directory | 官方同款标题（被覆盖的 browse picker 也是此标题），改名会与官方不一致，**保留** |
+| intro | 选择本机或远端机器上的目录作为工作区; 选中远端目录会在本地自动创建占位目录。 | 选择本机或某台远程主机上的目录作为工作区。之后会话会在该目录所在机器上执行。 | Pick a folder on this machine or on a remote host as the workspace. Sessions then run on that machine. | 去「占位目录」，讲价值 |
+| tab.local | 本地 | 本机 | This machine | 与「远程主机」对称 |
+| **→ tab.remote** | 远程主机 | 远程主机 | Remote host | 不变（或「其他机器」）|
+| **→ tab.defaultHint** | — | （上次使用：远程） | (last used: remote) | 记忆打开时 tab 下小标注（新增） |
+| local.home | 家目录 | 主目录 | Home | 统一 |
+| local.up | 上级 | 上一级 | Parent | —— |
+| local.open | 打开 | 打开 | Open | 与远程统一「打开」 |
+| local.newFolder | 新建文件夹 | 新建文件夹 | New folder | 不变 |
+| local.folderName | 文件夹名称 | 文件夹名 | Folder name | —— |
+| local.create | 创建 | 创建 | Create | 不变 |
+| local.loading | 加载中… | 正在加载… | Loading… | —— |
+| local.empty | (空目录) | 此文件夹为空 | This folder is empty | 去括号 |
+| local.loadFailed | 读取目录失败 | 无法读取此文件夹 | Couldn’t read this folder | —— |
+| local.createFailed | 新建文件夹失败 | 无法新建文件夹 | Couldn’t create folder | —— |
+| local.nativeHint | 当前环境未启用目录浏览，已切换到系统目录选择器。 | 在此处浏览目录不可用，改用本机文件夹选择器。 | In-app browsing isn’t available here, so we’ll use the system folder picker. | 人类化（配合 C 改为显式按钮触发） |
+| local.nativeAgain | 重新选择… | 重新选择… | Choose again… | —— |
+| host | 主机 | 主机 | Host | 不变 |
+| hostPh | 选择主机… | 选择主机… | Select a host… | —— |
+| noHosts | 还没有配置主机 — 请先到「SSH 连接」设置页添加。 | 还没有可用主机。请先到设置页「远程主机」添加一台。 | No hosts configured. Add one under Settings → Remote Hosts first. | 路径给全 |
+| home | 家目录 | 主目录 | Home | 统一 |
+| back | 返回 | 返回 | Back | 不变 |
+| retry | 重试 | 重试 | Retry | 不变 |
+| use | 使用此目录 | 打开 | Open | 与本地统一 |
+| using | 创建占位… | 正在准备… | Preparing… | 正在把该目录连到会话 |
+| cancel | 取消 | 取消 | Cancel | 不变 |
+| loading | 加载中… | 正在加载… | Loading… | —— |
+| emptyDir | (空目录) | 此文件夹为空 | This folder is empty | 去括号 |
+| loadHostsFailed | 读取主机列表失败 | 无法读取主机列表 | Couldn’t load hosts | —— |
+| loadDirFailed | 读取远端目录失败 | 无法读取远端文件夹 | Couldn’t read the remote folder | —— |
+| placeholderFailed | 创建本地占位目录失败 | 无法连接到此目录 | Couldn’t connect to this folder | 正向（不暴露"占位"） |
+| **→ select.remote.emptyCTA** | — | 去添加主机 | Add a host | noHosts 时引导按钮（新增） |
+
+---
+
+## 5. 视觉 / 交互规范
+
+### 5.0 设计 token（沿用，不加新体系）
+
+```css
+文字：--dsw-alias-label-primary / -secondary / -tertiary / -caption
+边框：--dsw-alias-border-l1 / -l2 / -l3
+背景：--dsw-alias-bg-layer-1 / -layer-2
+交互：--dsw-alias-interactive-bg-hover / -bg-active
+状态：--dsw-alias-state-success-primary / -error-primary / -warning-* / -info-*
+按钮：--dsw-alias-button-* 家族
+滚动条：--dsw-alias-scrollbar-*
+```
+对齐官方 `dsh-client-ui-directory-picker-browse` 的度量基准：
+- 弹窗宽 `min(560–680px, 100%)`；padding header `16/14/8/24`、body `16/16/16/24`、footer `16/24`。
+- 目录行高 **28px**、行圆角 **6px**、行 hover 用 `--dsw-alias-interactive-bg-hover`、选中用 `--dsw-alias-interactive-bg-active`；图标 16px `currentColor`。
+- 区块级标题 15px/600（现有 `.dsh-hosts-title` 与官方 16px/510 接近，可保留）。
+- **官方设置区块度量（ModelsSection 基准）**：区块 `max-width:720px`、gap `12`；标题 `16px/500`、描述 `14px/tertiary`；行卡 `border-l2`、圆角 `12px`、padding `12px 14px`；行间 gap `8`；按钮胶囊高 `36px`、半径 `18px`。
+
+### 5.1 复用原子组件（全部已存在，零新增依赖）
+
+| 需要 | 组件 | 说明 |
+|---|---|---|
+| 按钮 | `Button`（variant `primary/outline/ghost`，size `sm`） | 已用；testing 态给 `icon=IconLoadingOutline16` + disabled |
+| 输入 | `Input` | 已用 |
+| 弹窗 | `Modal`（`title/description/footer/closeLabel`） | 已用于工作区弹窗；删除确认可改用它或 `RiskConfirmation` |
+| 删除确认 | `RiskConfirmation` 或 `Modal` footer | 替换自造 `.dsh-delete` 内联条（V2）（取舍见 §6 C2）|
+| 状态点 | `StateDot`（`done|warning|ongoing|error`） | **连接状态统一视觉**：测试中=`ongoing`(蓝转)、成功=`done`(绿)、失败=`error`(红)、离线/`warning`(琥珀)。配文字（StateDot 是 aria-hidden） |
+| 胶囊 | `Pill`（`active`） | 认证类型（key/password）、主机状态 |
+| 短时反馈 | `Toast`（`text/icon/onDone`） | 保存成功「已保存」、删除成功、测试结果 |
+| 提示 | `Tooltip`（`label/side/maxWidth`） | 字段澄清（如「留空使用 ssh-agent」）、长错误详情收起 |
+| 下拉 | `Menu`（`items/selectedId/onSelect`） | 认证方式替换原生 `<select>`（I4，与另一子代理协同）|
+| 空状态 | 自绘 `.dsh-hosts-empty`（虚线框） | 配合 §4 价值导向文案 |
+
+### 5.2 状态反馈语言（连接中 / 成功 / 失败）
+
+统一"连接测试"三态规范，覆盖设置页测试 + 工作区选/连远端：
+
+| 状态 | 触发 | 视觉 | 文案 |
+|---|---|---|---|
+| 进行中 | 点「测试」或「打开(远程)」 | `StateDot ongoing`(蓝) + Button loading icon + 禁用重复触发 | 正在测试… / 正在准备… |
+| 成功 | 连接建立 | `StateDot done`(绿) + 内联条(浅绿底) + 可选 toast「已连接 · 可以开始会话」 | 已连接 · 可以开始会话 |
+| 失败 | 连接/鉴权/超时失败 | `StateDot error`(红) + 内联条(浅红底)，长错误详情收进 `Tooltip`(maxWidth 260px)，行内留一句 | 连接失败 |
+
+> 收敛三套自造错误条为一个语义组件（如 `StatusNote({state, text, detail?, onDismiss?})`），内部用 `StateDot` + 三态着色，替换 `.dsh-test/.dsh-hosts-error/.dsh-remote-error`（V3）。
+
+### 5.3 布局与层级
+
+- **设置页区块**：标题+描述头部 → 「添加主机」按钮右上；错误条（error 态）；主机列表卡片；空状态（虚线框+两行文案 C10/`empty.first`）；表单折叠区；删除确认。
+- **主机卡片**：名称(500)/地址子行(`host:port · user`)/认证 `Pill`；右侧操作 [测试][编辑][删除]；测试三态结果随卡片下方。
+- **工作区弹窗**：`Modal title+description` → tab 栏（`dsh-tabs`，`tab.defaultHint` 小标）→ body（本地=目录列表/远程=主机→目录）→ 底部 action 行（取消 ghost + 主操作 primary）。
+
+### 5.4 无障碍
+
+- `StateDot` 是 `aria-hidden`，凡用它的地方都配可见/视觉隐藏文字（官方一致）。
+- 图标按钮给 `aria-label`（`HostTestResult` 关闭钮已有）。
+- 弹窗 `closeLabel`、`Modal` 的 `title` 即 `aria-label`。
+- 目录行 `button` 用 `aria-current` 表达选中（对齐官方 browse picker L246）。
+
+---
+
+## 6. 实施方案清单（按文件/组件拆分，供实施子代理直接执行）
+
+> 全部改动集中在 `packages/dsh-ssh/client.js`。分 **A 默认体验**、**B 文案**、**C 视觉/交互**、**D 回归** 四批。B 依赖 A 的部分默认文案，先 A 后 B，C 可并行。
+> ⚠️ **行号注意**：本文档行号基于实读快照；**其他子代理正并行修改 client.js**（原生下拉已替换为 `SelectMenu`；「添加」按钮折行在修）。实施时**按组件/函数名定位**、行号仅供参考；改动前先 `grep` 复核。
+
+### A. 默认工作区体验（对应 §3 方案 C）
+- **A1** `DirectoryFlowCombined`（L1431）：默认 tab 由 `useState('local')` 改为 `useState(null)`（未定值）。挂载后读持久化记忆；若无则按 `listHosts` 是否非空决定 `remote`/`local`。未定前 body 渲染轻 loading。
+  - 实现提示：owner 加 `useEffect` 调 `props.listHosts()`（或复用 RemoteFlowBody 已有请求），`list.length > 0 → 'remote'`；写入 tab state。避免重复拉取：让 RemoteFlowBody 结果冒泡给 owner，或 owner 直接调一次。
+- **A2** 持久化记忆：新增 settings 字段（如 host namespace 的 `ui` 子对象 `lastWorkspaceTab`），打开写入、恢复。若持久化成本高/风险大，先降级为"仅本次会话记忆"（owner module 级 ref），记为可选项。
+- **A3** `LocalFlowBody`：**移除"自动弹出系统对话框"**。当前自动弹有**两条路径**（均已核实）：
+  - 路径①：挂载 effect（现 L1043-1052）——若 `nativeModeRef.current` 为真，直接 `enterNativeMode()`。
+  - 路径②：`list()` 失败分支（现 L1033-1037）——`isBrowseCapabilityError(err)` 命中时 `enterNativeMode()`。
+  - 而 `enterNativeMode()`（现 L1072 起）**既置 native 回退态又 `fireNativePick()`**。修复：把"进入 native 回退 UI"与"触发系统对话框"**拆成两个动作**——browse 能力缺失时只进入 native 回退 UI（显示 `local.nativeHint` 说明 + 显式「选择本机文件夹…」按钮），用户点击才 `fireNativePick()`；挂载 effect 不再自动进入 native。`nativeModeRef` 记忆保留但不再"一进即弹"。
+
+### B. 文案（对应 §4）
+- **B1** 重写 `ZH`/`EN`（L49-138）：按 §4.1 逐条替换 + 新增 `saved`、`empty.first`、`mountFail`。
+- **B2** 重写 `SSH_ZH`/`SSH_EN`（L140-203）：按 §4.2 逐条替换 + 新增 `tab.defaultHint`、`select.remote.emptyCTA`。
+- **B3** 修 `HostRow` 的 `t("passwordSet").split("(")[0]`（旧 L656）：`passwordSet` 新值不再含括号，去掉 split；如需"已保存"透传到 pill，直接用它。
+- **B4** `confirmDelete` 插值（L63）：`HostRow`/`SshHostsSection` 传 `{name}` → 用 `t("confirmDelete", {name: displayHostTitle(host)})` 的占位替换（若 bind 不支持插值，用 replace 回退）。
+- **B5** 收口绕过 locale 的硬编码文案（§2.4 H1-H3）：`resolveRemoteHome 返回异常`、`远程服务挂载失败…`、`远程服务未就绪…` 改用 locale；新增 `mountFail` key。
+
+### C. 视觉 / 交互（对应 §5，与另两子代理协同）
+- **C1** 状态组件收敛：抽 `StatusNote({state, text, detail?, onDismiss?})`，内部用 `StateDot` + 三态着色，替换 `.dsh-test/.dsh-hosts-error/.dsh-remote-error`。
+- **C2** 删除确认：`SshHostsSection` 的 `.dsh-delete` 改用 `RiskConfirmation` 或 `Modal` footer（V2）。若不想强勾选 acknowledge，用 `Modal`。
+- **C3** 认证方式下拉原生 `<select>` **已被另一子代理替换为官方 `Menu`（`SelectMenu`，client.js 现 L705-750）**，此条**已完成**；仅需确认 `field.authKey/authPassword` 用 §4 新文案。
+- **C4** 测试连接三态加入 `StateDot` + 成功/失败反馈（I2）；「已保存/已删除」反馈**优先采官方 `p.savedNotice` 内联绿字模式（`role="status"`）+ aria-live**，可选叠加 `Toast`。
+- **C5** `SshHostsSection` 空状态加 `empty.first` 副引导；远程空状态加 `select.remote.emptyCTA` 按钮。
+- **C6**（I7，产品改进）`HostForm` 增加「测试连接」按钮，让用户**保存前先试连**（复用 `props.testConnection` 的控制器；编辑态点测试即用表单当前值构造配置），减少"保存→试→失败→再编辑"往返。
+- **C7**（I9）远程浏览在 pathbar 主目录旁加显式「当前主机」名 identifier；`loadHostsFailed` 空态加「重试」按钮（I8）。
+
+### D. 回归确认
+- **D1** `scripts/client-selfcheck.mjs` 跑一遍。
+- **D2** `dsh --profile dssh-dev --dump-config` 确认 slot 仍 priority -1 双占位。
+- **D3** 手动（GUI 重启后）验证：0 主机默认本地、1+ 主机默认远程、本地 tab 不再自动弹系统对话框、文案/三态显示正常、中文 locale 生效、EN 对称。
+- **D4** 不改 core、不加依赖、不新建文件（除本 spec）。
+
+---
+
+## 7. 风险与开放项
+
+- **默认 tab 需异步等主机数**：`listHosts` 是 remote 调用，首次开弹窗可能有毫秒级延迟；A1 用"未定→轻 loading"过渡。（低风险）
+- **`confirmDelete` 插值**：若 `ctx.locale.bind` 不支持 `{}` 插值，按 B4 的 replace 回退。（低风险）
+- **RiskConfirmation 需勾选确认**：若产品上不想强制勾选，改 `Modal` 确认；两案在 C2 并列。（决策点）
+- **`tab.defaultHint` 记忆**若涉及 settings 持久化，需确认 host namespace 允许任意 `ui.*` 子键（评估后决定本次会话记忆 or 持久化）。（决策点）
+- **原生 select / 添加按钮折行**：由其他子代理负责，本 spec 文案（`field.auth*`）与之协同即可。
+
+---
+
+*文档版本 v1 · 由 UI/UX 设计子代理产出，依据 client.js 实读 + core ui-primitives 类型 + 官方 browse/settings 参考。*

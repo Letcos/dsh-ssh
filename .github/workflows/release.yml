@@ -1,0 +1,91 @@
+# =============================================================================
+# Release · npm 发布工作流 (packages/dsh-ssh)
+#
+# 触发方式: 推送形如 `v*` 的 tag (例如 v0.1.0) 即自动发布。
+#
+# 需要的 Repo Secret: `NPM_TOKEN`
+#   - 发行说明: 到 npmjs.com 创建 Access Token:
+#       * Granular Access Token: 勾选对 `@dsh-ssh` scope 的 "Read and write"
+#         权限 (推荐, 最小权限); 或
+#       * Classic Token: 需具备 publish 权限。
+#   - 然后在仓库 Settings -> Secrets and variables -> Actions 添加
+#     `NPM_TOKEN`。
+#   - 包为 scope 包无需 --access 也能发布, 但这里显式加 `--access public`,
+#     与 package.json 的 publishConfig.access=public 双重保险, 防止 scope 包
+#     默认 private 被拒。
+#   - 若把包改名到新 scope (如 @dsh-ssh/dsh-ssh), 记得让 NPM_TOKEN 对该 scope
+#     有发布权限。
+# =============================================================================
+
+name: Release (npm publish)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build & Test & Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # node 22+ 满足仓库引擎要求; registry-url 指向 npmjs 是关键 ——
+      # setup-node 会据此把 NODE_AUTH_TOKEN 写入 $HOME/.npmrc 供 npm publish 使用。
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      # 仓库根有 pnpm-workspace.yaml, 版本锁定在 root package.json 的
+      # packageManager 字段 (pnpm@11.21.0)。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 发布前单测必须全绿 (基线 272 tests, fail 0)。
+      - name: Run unit tests
+        run: |
+          cd packages/dsh-ssh
+          node --test test/*.test.js
+
+      # 客户端静态自检 (从仓库根运行, 仅依赖 node 内置 + stubs, 无需外部包)。
+      - name: client-selfcheck
+        run: node packages/dsh-ssh/scripts/client-selfcheck.mjs
+
+      # tag 版本必须与 packages/dsh-ssh/package.json 的 version 一致, 否则失败阻止发布。
+      - name: Verify tag matches package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PKG_VERSION="$(node -p "require('./packages/dsh-ssh/package.json').version")"
+          VER="v${PKG_VERSION}"
+          echo "tag=${TAG}  package.json version=${VER}"
+          if [ "${TAG}" != "${VER}" ]; then
+            echo "::error::Tag '${TAG}' does not match package.json version '${VER}'. " \
+                 "Bump packages/dsh-ssh/package.json version and re-tag."
+            exit 1
+          fi
+          echo "Version check passed."
+
+      # 发布目录为 packages/dsh-ssh (整个包目录)。
+      # package.json 的 files 白名单已排除 test/, 只发布
+      # index.js/tools.js/client.js/src/lib/preset/scripts/cordis.patch.yml。
+      - name: Publish to npm
+        run: npm publish --access public
+        working-directory: packages/dsh-ssh
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
