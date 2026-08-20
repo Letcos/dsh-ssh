@@ -16,6 +16,7 @@ Status: implemented
 - **E: 移除「上次使用:远程」提示**:删除弹窗顶部 `tab.defaultHint` 提示元素及为之存在的 `fromMemory` 状态/逻辑,并移除 ZH/EN 对应 locale key——本地与远端页签都不再显示该提示。
 - **F: 设置详情页标题纯文字化**:标题由「地球 icon+远程主机」改为纯文字 `h2`「SSH 连接」,CSS 对齐官方设置详情标题(`dsh-client-ui-settings-models` ModelsSection 的 h2.title:16px/500/24px,不另创字号);移除详情标题上的地球 icon(`IconGlobeOutline14` 随之删除)。
 - **G: 主机列表地址展示脱敏**:新增 `maskHostAddress`(仅展示层)——保留地址首尾点分段、中间每段替换为 `***`(如 `49.***.***.93`;hostname 同理,≤2 段时原样返回),应用到 HostRow 的地址行;存储与建连仍用完整 `host.host`。
+- **H: 设置详情页排版对齐官方「Agent 预设」页(rtSEdW 值)**:对照官方 `dsh-client-ui-agent-preset` 的 `AgentPresetSection.module.css`(打包进 lib/client.js 的 CSS hash `rtSEdW`)做纯排版对齐——标题已是 18/600 不变;容器 `.dsh-hosts` gap 14→12px、加 `max-width:720px`(官方 _section 的 gap:12px/内宽 720);intro 由 12/18 改为官方 13px、`margin:0`、tertiary 色;新增 `_group`+ 列表分节小标题 `_groupHead`(`letter-spacing:.06em`、uppercase、12px/600、tertiary)包住主机列表,文案走新 locale key `listLabel`(zh「主机列表」/ en「Host list」)。**明确不改**:主机列表 `.dsh-row*`(HostRow)行样式维持原样,未改成官方 card 样式。全部新样式沿用既有 `--dsw-alias-label-*` 主题 token。
 
 ## Alternatives considered
 - 方案 A1-A2 持久化到 settings 命名空间(设计文档原意):受 api.settings 白名单 + 不改 src/ 双重限制 → 降级 localStorage(键 dsh-ssh.ui.*),记录备查。
@@ -28,3 +29,4 @@ Status: implemented
 ## 出处
 - archived/a-series-log.md A.15(显示名 basename)、A.23(原生下拉→Menu)、A.24(UI/UX 四批 + 方案 C)、A.29(主机标识 + base64 排查)、A.32(标题格式 主机名/目录)、附录 B(bash toolview)。
 - design/ui-ux-spec.md §6;dsh-client-ui-tool/lib/client.js BashRow / tool.call.toolview 槽;dsh-client-ui-slots keyed slot;本仓库 src/placeholder.js、src/remote.js createPlaceholder、client.js。
+- 排版对齐出处(已验证):官方 CSS 值取自 `C:\Users\Administrator\.dsh\profiles\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\dsh-client-ui-agent-preset\lib\client.js:976-977`(AgentPresetSection.module.css 内联,hash `rtSEdW`);主题 token `--dsw-alias-label-{primary,secondary,tertiary}` 定义于 `dsh-client-ui-theme\lib\styles\design-platform.css:207-209 / 299-301`(深/浅色)。

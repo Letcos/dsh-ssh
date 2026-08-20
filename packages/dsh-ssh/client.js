@@ -54,6 +54,7 @@ window.__ModuleLoader__.load({
       "nav": "SSH 连接",
       "title": "SSH 连接",
       "intro": "把另一台机器的目录作为工作区。添加主机后，即可在其中创建会话，命令、文件与搜索都会在该机器上执行。口令留空表示沿用已保存的值。",
+      "listLabel": "主机列表",
       "add": "添加主机",
       "edit": "编辑",
       "save": "保存",
@@ -115,6 +116,7 @@ window.__ModuleLoader__.load({
       "nav": "SSH Connections",
       "title": "SSH Connections",
       "intro": "Add machines to use a folder on them as a workspace. Once added, sessions run there — commands, files, and search all execute on that machine. Leave the password blank to keep the saved value.",
+      "listLabel": "Host list",
       "add": "Add host",
       "edit": "Edit",
       "save": "Save",
@@ -763,12 +765,16 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- components ----------
-    var CSS = ".dsh-hosts{display:flex;flex-direction:column;gap:14px;padding:4px 2px 20px;font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary,#e6e6e6)}" +
+    var CSS = ".dsh-hosts{display:flex;flex-direction:column;gap:12px;max-width:720px;padding:4px 2px 20px;font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary,#e6e6e6)}" +
       ".dsh-hosts-header{display:flex;align-items:center;justify-content:space-between;gap:8px}" +
-      // Mirrors the official settings section title (e.g. Models) so the heading
-      // reads at the same size/weight as the built-in settings detail pages.
+      // Typography mirrors the official settings section (AgentPresetSection.module.css,
+      // dsh-client-ui-agent-preset): title 18/600, intro 13px tertiary, section gap 12px,
+      // a group header in 12px/600 uppercase. The host rows themselves (.dsh-row*) stay as-is.
       ".dsh-hosts-title{margin:0;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:18px;font-weight:600}" +
-      ".dsh-hosts-intro{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}" +
+      ".dsh-hosts-intro{color:var(--dsw-alias-label-tertiary,#9a9a9a);margin:0;font-size:13px}" +
+      ".dsh-hosts-group{flex-direction:column;gap:10px;display:flex}" +
+      ".dsh-hosts-group+.dsh-hosts-group{margin-top:20px}" +
+      ".dsh-hosts-groupHead{letter-spacing:.06em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary,#9a9a9a);margin:0;font-size:12px;font-weight:600}"
       ".dsh-hosts-error{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-radius:10px;color:var(--dsw-alias-state-error-primary,#ef4444);background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 30%,transparent);font-size:12px;line-height:16px;word-break:break-word}" +
       ".dsh-hosts-empty{display:flex;align-items:center;justify-content:center;min-height:120px;border:1px dashed var(--dsw-alias-border-l2,#36373b);border-radius:12px;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-size:13px}" +
       ".dsh-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:12px;background:var(--dsw-alias-bg-layer-1,#1c1d21)}" +
@@ -1211,7 +1217,10 @@ window.__ModuleLoader__.load({
             )
           );
         } else {
-          body = React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, rows);
+          body = React.createElement("section", { className: "dsh-hosts-group" },
+            React.createElement("h3", { className: "dsh-hosts-groupHead" }, t("listLabel")),
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, rows)
+          );
         }
       } else {
         body = null;
