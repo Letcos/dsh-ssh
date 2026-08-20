@@ -60,7 +60,6 @@ In a remote workspace, only the seven routed tools execute on the remote host:
 
 ## Known limitations
 
-- `~/.ssh/config` is not parsed — fill in hosts explicitly in the settings page.
 - No ProxyJump / multi-hop — direct single-hop connections only.
 - Remote `grep` uses GNU grep; ignore rules differ slightly from `rg`.
 - If SFTP is disabled on the remote, file operations automatically fall back to `exec` + base64 (works, but slower).

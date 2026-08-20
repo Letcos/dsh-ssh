@@ -11,6 +11,7 @@
 - **纯附加、可插拔**: 全部产物 = 通过官方 bundle 通道安装的插件包(工具路由经 agent/created 钩子, 无独立 preset); 卸载后 DSH 完全恢复原样。
 - **本地工作区行为完全不变**: 本地路径的请求仍走宿主 ctx.shell / ctx.fs / ctx.subprocess, 与未装插件时逐字节一致。
 - **DSH 升级自适应**: core 零改动即天然兼容升级; 路由实现挂在 host 插件钩子(agent/created)上, 不依赖任何 preset 副本, 无上游 preset 同步维护点。
+- **敏感信息零入库**: 真实服务器地址/主机名、本机绝对路径(含用户名)、私钥路径、凭据等一律不写进代码/注释/文档/笔记; 示例值一律用 RFC 5737 文档地址(如 203.0.113.10)与通用占位符。
 
 > 工具路由 / bundle 通道 / UI 通信等架构结论、已知坑与设计取舍的权威记录见
 > `.agents/notes/requirements-and-design.md`(稳定规范)与 `.agents/notes/implemented/`(逐条取舍);

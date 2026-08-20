@@ -60,7 +60,6 @@ dsh plugin add @dsh-ssh/dsh-ssh
 
 ## 已知限制
 
-- 不解析 `~/.ssh/config` —— 请在设置页显式填写主机。
 - 不支持 ProxyJump / 多跳 —— 仅单跳直连。
 - 远端 `grep` 基于 GNU grep，忽略规则与 `rg` 略有差异。
 - 远端禁用 SFTP 时，文件操作自动降级为 `exec` + base64（可用但更慢）。
