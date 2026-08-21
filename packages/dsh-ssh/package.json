@@ -1,6 +1,6 @@
 {
   "name": "@dsh-ssh/dsh-ssh",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "SSH remote workspace for DeepSeek Harness: ssh2 connection pool, host settings, and routed bash/fs/search tools",
   "type": "module",
   "engines": {

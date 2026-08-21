@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "DSH SSH remote workspace plugin monorepo (pnpm workspace)",
   "license": "MIT",
