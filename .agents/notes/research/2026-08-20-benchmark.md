@@ -1,7 +1,7 @@
 # 实测基准数据(README 真实数据来源)
 
 > 日期: 2026-08-16(本机时钟); 脚本: packages/dsh-ssh/scripts/bench.mjs(可重跑, 参数内联)。
-> 测试远端: ubuntu@203.0.113.10(Ubuntu x86_64, 公网 IP); 本机: AhaoMacBook.local(darwin/arm64)。
+> 测试远端: ubuntu@203.0.113.10[^1](Ubuntu x86_64, 公网 IP); 本机: 本地主机 (darwin/arm64)。
 
 | 指标 | 结果 | 备注 |
 |---|---|---|
@@ -18,3 +18,5 @@
 - SFTP 读明显慢于写(992ms vs 218ms @1MiB), 疑似 ssh2 默认读窗口/chunk 保守; 若 README 需要更漂亮数字, 可在 ssh-core 调 SFTP 窗口参数后重测(待办, 记录于后)。
 - 远端 glob/grep 是远端单命令批量完成(设计决策 D2/R8), 200 文件树内 24/79ms, 无逐文件往返。
 - 复跑: cd packages/dsh-ssh && node scripts/bench.mjs(远端只碰 /tmp, 自动清理)。
+
+[^1]: RFC 5737 示例地址，非真实主机

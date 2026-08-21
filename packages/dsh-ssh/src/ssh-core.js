@@ -738,7 +738,12 @@ export class SshPool {
         return existing.connect(); // reuse open conn; idempotent connect()
       }
     }
-    if (this.conns.size >= this.maxConnections) await new Promise((r) => this.waiters.push(r));
+    if (this.conns.size >= this.maxConnections) {
+      await new Promise((r) => this.waiters.push(r));
+      // A waiter woken by dispose() must not proceed: re-check after the await so a
+      // disposed pool never hands out a new connection.
+      if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
+    }
     const conn = new SshConn(cfg);
     this.conns.set(id, conn);
     try {

@@ -1,5 +1,5 @@
-// @dsh-ssh/dsh-ssh — M3b local-delegation tests (node --test, no network/IO).
-// 验证本地分支把调用转发给宿主全局同名工具(逐字节一致的硬约束 4), 参数/exec 原样传递。
+// @dsh-ssh/dsh-ssh — local-delegation tests (node --test, no network/IO).
+// Verifies the local branch delegates to the host global tool of the same name (byte-identical hard constraint), args/exec passed through unchanged.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { apply } from '../tools.js';
@@ -39,7 +39,7 @@ function makeExec(cwd) {
   return { agent: { session: { header: { cwd } } }, signal: undefined };
 }
 
-const LOCAL_CWD = '/Users/haowu/project';
+const LOCAL_CWD = '/home/devuser/project';
 
 test('local bash delegates to official tool-bash (same args + exec)', async () => {
   const ctx = makeCtx({ bash: { result: { kind: 'foreground', delegated: 'bash' } } });
@@ -112,7 +112,7 @@ test('missing official tool → clear error (e.g. win32 tool-bash disabled)', as
   );
 });
 
-test('registered tool set = exactly the seven M3 tools (bash/read/write/edit/read_image/glob/grep)', () => {
+test('registered tool set = exactly the seven tools (bash/read/write/edit/read_image/glob/grep)', () => {
   const ctx = makeCtx({});
   apply(ctx);
   assert.deepEqual([...ctx._registered.keys()].sort(), ['bash', 'edit', 'glob', 'grep', 'read', 'read_image', 'write']);

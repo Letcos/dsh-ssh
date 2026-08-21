@@ -1,11 +1,11 @@
 # preset 无关的 SSH 工具路由方案可行性调研
 
-> 纯调研, 不改任何代码/配置。结论均注明源码出处(本地 DSH checkout = D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh; 下简称「core」, 版本 0.1.0-rc.6, cordis 4.0.1)。
+> 纯调研, 不改任何代码/配置。结论均注明源码出处(本地 DSH checkout = <dsh-checkout>; 下简称「core」, 版本 0.1.0-rc.6, cordis 4.0.1)。
 > 日期: 2026-08-19(子代理调研, 主 Agent 待复核)。
 
 ## 0. 一句话结论
 
-**profile/home/--patch 层根本无法触达 preset 里的工具行; 而官方六工具的注册点又在 preset(agent 平面)而非 host 平面; 因此「全 preset 通吃」的可行路线只有两条: (a) 在每个 agent 自身 scope 上经 `agent/created` 钩子注册同名路由工具(遮蔽 preset 的官方工具, 本地路径委托 host 全局官方实现)——这是真正 preset 无关的方案; 或 (b) 动态生成 preset 变体(受 `copy` 无 write 语义限制, 需直接落盘)。「服务层替换」与「profile patch 换 name」两条路经源码证伪。**
+**profile/home/--patch 层根本无法触达 preset 里的工具行; 而官方七工具的注册点又在 preset(agent 平面)而非 host 平面; 因此「全 preset 通吃」的可行路线只有两条: (a) 在每个 agent 自身 scope 上经 `agent/created` 钩子注册同名路由工具(遮蔽 preset 的官方工具, 本地路径委托 host 全局官方实现)——这是真正 preset 无关的方案; 或 (b) 动态生成 preset 变体(受 `copy` 无 write 语义限制, 需直接落盘)。「服务层替换」与「profile patch 换 name」两条路经源码证伪。**
 
 ---
 
@@ -22,7 +22,7 @@
 - disabled 语义: `cordis-plugin-loader/src/config/entry.ts` L19(`disabled?: boolean|null`)、L84-98(disabled 沿父链传播, group 恒 enabled)、L104-108(支持 `!!js` 表达式求值)。
 - id 级定位: `applyEntryPatches` L66-75 建 `entryMap`(含 group 嵌套); insert 可定向到某个 group 的 config 数组(L80-102)。
 
-**含义**: 六工具的实现类(name)不能通过 profile/home patch 替换; 只能改 config / disabled / insert 新行。这是后面所有方案判断的基石。
+**含义**: 七工具的实现类(name)不能通过 profile/home patch 替换; 只能改 config / disabled / insert 新行。这是后面所有方案判断的基石。
 
 ### Q2 组合层叠顺序(以及 preset 层在哪)
 
@@ -43,11 +43,11 @@
 - preset id 解析: `dsh-agent-presets/lib/index.js` L762-768(`resolveSessionPreset`: header.agentPreset 或最后一个 `agent-preset/selected` 事件)。
 - 创建流程: `dsh-host-apiproxy/lib/index.js` L1783-1797(`composeAgent`: 会话建立前 `presets.resolve(presetId)`, 返回 `setup(agentCtx)` 回调), L1801-1807(agent factory 的 setup = `composeAgent(resolveSessionPreset(...))`)。
 - 物化: `dsh-agent-presets/lib/index.js` L954-961(`AgentPresets.mount`: `ensureStanding` + `bindScopeParent(agentKey, standing.key)`)。
-- **工具如何注册**: 六工具由 preset 的 `tool-bash`/`tool-fs`/`tool-fs-search` 行注册——`core/config/agent-presets/standard/agent.cordis.yml` L44-62。**dsh-base host 层也有同 id 行**(全局层, rosterless 回退)——`dsh-base/cordis.patch.yml` L210-230。作用域语义: "Scoped registrations shadow globals"——`dsh-tools/lib/index.js` L2550; 遮蔽解析 L2843-2869(`view`), 查找 L2879-2881(`get`, 不带 scope 即全局视图)。
+- **工具如何注册**: 七工具由 preset 的 `tool-bash`/`tool-fs`/`tool-fs-search` 行注册——`core/config/agent-presets/standard/agent.cordis.yml` L44-62。**dsh-base host 层也有同 id 行**(全局层, rosterless 回退)——`dsh-base/cordis.patch.yml` L210-230。作用域语义: "Scoped registrations shadow globals"——`dsh-tools/lib/index.js` L2550; 遮蔽解析 L2843-2869(`view`), 查找 L2879-2881(`get`, 不带 scope 即全局视图)。
 - 子 agent 继承: `dsh-subagent/lib/index.js` L532/L571(`composedPreset` + `composeFrom`)。
 - 注入点(仅这些): `dsh-agent/README.zh.md` L15/L51——`setup(agentCtx)` 是发布前唯一可异步组合的点(由会话创建代码持有, 第三方插件无法插入); `agent/created` 在 setup 之后、driver 启动之前同步发出; `agent/session-start` 是第一个不可 veto 的启动通知。
 
-### Q4 官方六工具的服务调用面
+### Q4 官方七工具的服务调用面
 
 **结论: 三工具完全经 `ctx.shell` / `ctx.fs` / `ctx.subprocess`, 无任何绕过服务直调 node API 的路径。注意 glob/grep 走的是 `ctx.subprocess`(spawn 打包的本地 `@vscode/ripgrep`), 而非 ctx.fs/ctx.shell。**
 
@@ -88,18 +88,18 @@
 
 ## 3. 推荐结论(组合方案)
 
-1. **主路线 = 方案⑤(会话创建钩子)**: host 平面插件监听 `agent/created`, 仅当 `agent.session.header.cwd` 为远端占位路径(`~/.dsh/remote/<hostId>/...`)时, 经 `agent.ctx.tools.register(...)` 注册六个同名路由工具(遮蔽 preset 官方工具; 本地路径 `ctx.tools.get(name)` 无 scope 查找 → 委托 host 全局官方实现, 逐字节一致)。这是唯一真正 preset 无关、且不破坏本地行为的路线。
-2. **保留 standard-ssh preset 作为显式可选(回退/诊断)**: 方案① 已实装, 作为「显式选 preset 即启用」的确定性路径继续保留, 与 ⑤ 不冲突。
+1. **主路线 = 方案⑤(会话创建钩子)**: host 平面插件监听 `agent/created`, 仅当 `agent.session.header.cwd` 为远端占位路径(`~/.dsh/remote/<hostId>/...`)时, 经 `agent.ctx.tools.register(...)` 注册七个同名路由工具(遮蔽 preset 官方工具; 本地路径 `ctx.tools.get(name)` 无 scope 查找 → 委托 host 全局官方实现, 逐字节一致)。这是唯一真正 preset 无关、且不破坏本地行为的路线。
+2. **保留 standard-ssh preset 作为显式可选(回退/诊断)**（后续已改为 agent/created 钩子方案，preset 已移除）: 方案① 已实装, 作为「显式选 preset 即启用」的确定性路径继续保留, 与 ⑤ 不冲突。
 3. **不采纳 ③/④**: ③ 被 Q1/Q2 证伪; ④ 被 Q5 证伪(硬约束 + 副作用)。
 
 ### 若采纳方案⑤, 最小验证步骤
 
-1. **静态**: 在隔离 profile(dssh-dev)写一个最小 host 插件: `ctx.on('agent/created', ({agent}) => { if (isRemoteCwd(agent.session.header.cwd)) agent.ctx.tools.register(routeTool('bash',...)) })`; `dsh --profile dssh-dev --dump-config` 确认插件行进入 host 组合。
+1. **静态**: 在隔离 profile(dsh-ssh-dev)写一个最小 host 插件: `ctx.on('agent/created', ({agent}) => { if (isRemoteCwd(agent.session.header.cwd)) agent.ctx.tools.register(routeTool('bash',...)) })`; `dsh --profile dsh-ssh-dev --dump-config` 确认插件行进入 host 组合。
 2. **时序**: 验证 `agent/created` 在首次工具调用前触发(源码已证: createAgent 在 announce 后才 start driver; 可用日志/断点确认)。
 3. **遮蔽**: 新建会话选 `standard`(非 standard-ssh), cwd 指向远端占位路径; 调用 bash → 断言走路由实现(非官方); 本地会话选 standard → 断言 `agent/created` 未注册、行为与未装插件一致。
 4. **委托**: 本地路径调用 → 断言 `ctx.tools.get(name)`(无 scope)命中官方全局实现, 结果与官方逐字节一致。
 5. **子 agent**: fork/subagent 子会话同样经 `agent/created` 注册路由工具, 远端/本地路由一致。
-6. **code/minimal preset**: 确认 code-mode 会话目录不被破坏(run_code 保留), minimal 会话在远端 cwd 下获得六工具(或按产品决策收窄为「仅遮蔽已存在的工具名」)。
+6. **code/minimal preset**: 确认 code-mode 会话目录不被破坏(run_code 保留), minimal 会话在远端 cwd 下获得七工具(或按产品决策收窄为「仅遮蔽已存在的工具名」)。
 
 ## 4. 关键出处速查(源码行号)
 
@@ -107,7 +107,7 @@
 - 层叠: `core/lib/profile-boot-DG5t9aNs.js` L102-106、L146-198; `dsh-app-boot/lib/index.js` L539-557、L575-580。
 - preset 挂载(无 patch): `dsh-agent-presets/lib/index.js` L707-735、L1130-1159。
 - 会话创建/preset 解析: `dsh-host-apiproxy/lib/index.js` L1783-1807; `dsh-agent-presets/lib/index.js` L762-768、L954-961。
-- 六工具服务面: `dsh-tool-bash/lib/index.js` L111-116/L429; `dsh-tool-fs/lib/index.js` L1173-1177/L274/L419/L656/L660/L805/L809/L1015-1020; `dsh-tool-fs-search/lib/index.js` L8-27/L120-123/L159-200。
+- 七工具服务面: `dsh-tool-bash/lib/index.js` L111-116/L429; `dsh-tool-fs/lib/index.js` L1173-1177/L274/L419/L656/L660/L805/L809/L1015-1020; `dsh-tool-fs-search/lib/index.js` L8-27/L120-123/L159-200。
 - 服务注册/重复: `dsh-fs/lib/index.js` L58-60; `dsh-subprocess/lib/index.js` L52-55; `dsh-base/README.zh.md` L7。
 - tools 遮蔽语义: `dsh-tools/lib/index.js` L2550、L2843-2881。
 - standard preset 工具行: `core/config/agent-presets/standard/agent.cordis.yml` L44-62。

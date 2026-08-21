@@ -23,5 +23,5 @@ Status: implemented
 - 远端会话 scheme 描述与能力面注入(见 skill-mcp-capability-surface note)复用同一 agent/created 钩子,独立于工具遮蔽。
 
 ## 出处
-- archived/a-series-log.md A.18(方案⑤实施)、A.27(bash 必注册修订)、A.31(会话 ID 审计);decisions/2026-08-19-agent-created-tool-shadowing.md、decisions/2026-08-19-remote-shell-follows-remote-platform.md。
-- dsh-tools@lib/index.js scoped shadows global;dsh-agent/README agent/created 时序;dsh-base/cordis.patch.yml(:212 tool-bash disabled: win32);subprocess-local/lib/index.js:298 spawnTerminal。
+- `archived/a-series-log.md` A.18（方案⑤实施）、A.27（bash 必注册修订）、A.31（会话 ID 审计）；`research/2026-08-20-preset-independent-tool-routing.md`（方案对比与可行性调研，Q1-Q6）。注：原决策目录已并入 `implemented/`，上述 A 条目即原决策归档位置。
+- `dsh-tools@lib/index.js` scoped shadows global；`dsh-agent/README` `agent/created` 时序；`dsh-base/cordis.patch.yml`（:212 `tool-bash` `disabled: win32`）；`subprocess-local/lib/index.js:298` `spawnTerminal`。

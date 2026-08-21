@@ -6,20 +6,20 @@
 // SELF-CONTAINED: the factory's require() only resolves the web module map
 // (react, @deepseek-ai/dsh-client-ui-primitives), never relative imports —
 // so the pure model helpers below are an inlined, verbatim copy of
-// packages/@dsh-ssh/dsh-ssh/lib/hosts-model.js (the canonical, node-tested copy;
+// packages/dsh-ssh/lib/hosts-model.js (the canonical, node-tested copy;
 // keep them in sync), and the Typert client descriptors inline
-// packages/@dsh-ssh/dsh-ssh/lib/typert-contribution.js.
+// packages/dsh-ssh/lib/typert-contribution.js.
 //
 // Architecture (all official seams):
 //   - settings.section slot (kind list, scope root): id 'ssh-hosts',
 //     registration options {id, order, label, locale, inject} per
 //     dsh-client-ui-settings/lib/types/client/contract/slots.d.ts:67 and the
 //     in-tree consumer dsh-client-ui-agent-preset/lib/client.js:1706.
-//   - CRUD + F2 test connection: ALL host-editor RPC rides the self-built
+//   - CRUD + test connection: ALL host-editor RPC rides the self-built
 //     Typert remote — ctx.remote.$mount(CLIENT_TYPERT_REMOTE) installs
 //     ctx.remote.ssh.{listHosts, saveHost, deleteHost, testConnection} over
 //     the official Typert gateway; the host half lives in
-//     packages/@dsh-ssh/dsh-ssh/src/remote.js. api.settings is NOT used: the settings
+//     packages/dsh-ssh/src/remote.js. api.settings is NOT used: the settings
 //     wire only serves a hard-coded namespace whitelist
 //     (dsh-host-apiproxy/lib/index.js:888 WEB_SETTINGS_NAMESPACES), so
 //     plugin namespaces answer settings-not-exposed.
@@ -174,7 +174,7 @@ window.__ModuleLoader__.load({
       "trust.cancel": "Cancel",
       "trust.error": "Failed to save",
     };
-    // M4: directoryFlow occupant locale (new namespace workspace.ssh)
+    // directoryFlow occupant locale (new namespace workspace.ssh)
     var SSH_ZH = {
       "title": "选择工作区目录",
       "intro": "选择本机或某台远程主机上的目录作为工作区。之后会话会在该目录所在机器上执行。",
@@ -271,7 +271,7 @@ window.__ModuleLoader__.load({
     };
 
     // ---------- pure model helpers (inline copy of lib/hosts-model.js) ----------
-    // Canonical copy lives in packages/@dsh-ssh/dsh-ssh/lib/hosts-model.js (node-tested).
+    // Canonical copy lives in packages/dsh-ssh/lib/hosts-model.js (node-tested).
     // Host-only helpers intentionally NOT duplicated here: mergeTestConfig,
     // mergeHostPatch, validateHostConfig, redactHosts, hostsSecretsList.
     function normalizePort(value) {
@@ -306,7 +306,7 @@ window.__ModuleLoader__.load({
       return host && host.auth && host.auth.type === 'password' ? 'password' : 'key';
     }
     // Display-only masking for the host list: keep the first and last dot-segment and
-    // replace every middle segment with "***" (e.g. 49.***.***.93). Storage and
+    // replace every middle segment with "***" (e.g. 203.***.***.113). Storage and
     // connection use the full host value; only this list rendering is redacted.
     function maskHostAddress(addr) {
       var s = String(addr == null ? '' : addr);
@@ -1017,7 +1017,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // A.23: custom select — official primitives.Menu as a styled dropdown
+    // custom select — official primitives.Menu as a styled dropdown
     // trigger (mirrors the old native <select> capsule via .dsh-select with DSH
     // theme tokens), so it matches dark/light themes and is fully keyboard
     // accessible (role=menu, Escape/outside-click close handled by Menu).
@@ -1616,7 +1616,7 @@ window.__ModuleLoader__.load({
 
       // TOFU trust state for directory browsing (local state; the dialog is rendered
       // inside this component's returned Fragment).
-      // trustInfo = { hostId, host, port, keyType, fingerprint, rawKeyBase64, retry, trusting, error }。
+      // trustInfo = { hostId, host, port, keyType, fingerprint, rawKeyBase64, retry, trusting, error }.
       var HKU_STAGE = 'host-key-unknown';
       var trustState = React.useState(null);
       var trustInfo = trustState[0];
@@ -2164,7 +2164,7 @@ window.__ModuleLoader__.load({
     // (@deepseek-ai/dsh-client-ui-tool/lib/client.js:1146) displays only the last cwd
     // segment to the terminal promptLabel (primitives' promptLabel takes the last path
     // segment), so the user sees a base64 blob like
-    // "L2hvbWUvdWJ1bnR1L29wZW5jb2RlLWFwaQ".
+    // "L3Nydi93b3Jr".
     // ── Why it must be overridden client-side ──
     // The host-side presentCall only receives args (no session/routing context), and
     // the route depends on that base64 segment to decode the real remote path (the

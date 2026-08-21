@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// @dsh-ssh/dsh-ssh — A.36 SFTP 禁用降级(ExecFs)真机验证 (2026-08-19+).
-// 用 forceExecFs 开关(连接层测试开关, 不改远端 sshd/不触碰真实配置)模拟“SFTP 不可用”,
-// 对 /tmp/dsh-ssh-sftp-fallback 走 ExecFs(exec+base64)全链路: read/write/stat/readdir/
-// rename/unlink/mkdir + 大文件分块, 并与同主机 SFTP 路径结果对比; 另用降级 conn 起一个
-// 后台任务, 验证日志/status 经 ExecFs 拉取与清理。测完清理 /tmp/dsh-ssh-sftp-fallback
-// 与 /tmp/dsh-ssh-jobs-fb。
+// @dsh-ssh/dsh-ssh — SFTP disabled fallback (ExecFs) live verification.
+// Uses the forceExecFs switch (connection-layer test switch, does not change remote sshd or real config) to simulate "SFTP unavailable",
+// and exercises the full ExecFs (exec+base64) path on /tmp/dsh-ssh-sftp-fallback: read/write/stat/readdir/
+// rename/unlink/mkdir + large-file chunking, comparing results with the SFTP path on the same host; also starts a
+// background job via the degraded connection to verify logs/status are fetched and cleaned via ExecFs. Cleans up /tmp/dsh-ssh-sftp-fallback
+// and /tmp/dsh-ssh-jobs-fb afterwards.
 // PREREQ: reachable test remote (defaults + DSH_SSH_TEST_* overrides in test/live-config.mjs).
 // Switch machines by exporting the DSH_SSH_TEST_* vars; touches only /tmp/dsh-ssh-* on the remote.
 import { SshPool, shellQuoteSingle } from '../src/ssh-core.js';
@@ -12,7 +12,7 @@ import { createRemoteBashJobHooks, defaultRemoteJobDir } from '../src/remote-job
 import { liveConfig, liveHostConfig, requireRealHost } from '../test/live-config.mjs';
 requireRealHost('scripts/verify-execfs-fallback');
 
-// 主机/私钥统一来自 live-config(A.38); 私钥默认 id_ed25519, DSH_SSH_TEST_KEY_PATH 可覆盖。
+// Host/private-key config comes from live-config; defaults to id_ed25519, overridable via DSH_SSH_TEST_KEY_PATH.
 const REMOTE = liveConfig.remoteRoot + '-sftp-fallback';
 const JOB_DIR = defaultRemoteJobDir('fb'); // /tmp/dsh-ssh-jobs-fb
 const cfgBase = {
@@ -20,7 +20,7 @@ const cfgBase = {
   knownHostsPath: '/tmp/dsh-ssh-test-known_hosts', acceptNew: true, connectTimeoutMs: 10_000,
 };
 
-// watchdog: 防任何卡死(连接/轮询)导致脚本悬挂无输出。
+// watchdog: prevents the script from hanging with no output on any deadlock (connection/polling).
 setTimeout(() => { console.error('EXECFS-LIVE-RESULT: TIMEOUT'); process.exit(3); }, 100_000).unref();
 
 let fails = 0;
@@ -36,8 +36,8 @@ const clean = async (c) => {
   await c.exec('mkdir -p ' + shellQuoteSingle(REMOTE)).catch(() => {});
 };
 
-const connS = await pool.acquire({ ...cfgBase, id: 'sf', forceExecFs: false }); // SFTP 正常
-const connF = await pool.acquire({ ...cfgBase, id: 'fb', forceExecFs: true });  // 强制降级
+const connS = await pool.acquire({ ...cfgBase, id: 'sf', forceExecFs: false }); // SFTP normal
+const connF = await pool.acquire({ ...cfgBase, id: 'fb', forceExecFs: true });  // forced fallback
 await clean(connS);
 
 try {
@@ -52,9 +52,9 @@ try {
   const pText = REMOTE + '/t.txt';
   const pBinF = REMOTE + '/bin-f.dat';
 
-  await fsS.writeFileAtomic(pBin, bin);            // SFTP 写二进制
-  await fsF.writeFileAtomic(pText, Buffer.from(text, 'utf8')); // 降级写文本
-  await fsF.writeFileAtomic(pBinF, bin);           // 降级写二进制
+  await fsS.writeFileAtomic(pBin, bin);            // SFTP write binary
+  await fsF.writeFileAtomic(pText, Buffer.from(text, 'utf8')); // fallback write text
+  await fsF.writeFileAtomic(pBinF, bin);           // fallback write binary
 
   check('fallback reads SFTP-written binary (base64 roundtrip)', eqBuf(await fsF.readBytes(pBin), bin));
   check('SFTP reads fallback-written binary', eqBuf(await fsS.readBytes(pBinF), bin));
@@ -91,13 +91,13 @@ try {
     cwd: REMOTE, hostId: 'fb', jobDir: JOB_DIR, pollMs: 150,
   });
   await hooks._spawned;
-  await new Promise((r) => setTimeout(r, 400)); // 进程仍存活, log 已含 TICK-* → 验证“运行中增量拉取”
+  await new Promise((r) => setTimeout(r, 400)); // process still alive, log already contains TICK-* -> verify mid-run incremental fetch
   await hooks._refresh();
   const liveOut = hooks.readOutput();
   const doneRes = await hooks.done;
   check('fallback background job completed', doneRes && doneRes.status === 'completed', JSON.stringify(doneRes));
   check('fallback live output pulled via execfs (mid-run)', /TICK-1/.test(liveOut) && /TICK-2/.test(liveOut), JSON.stringify(liveOut));
-  // 终态持久数据经 execfs 读回(作业写出的 marker), 证明降级读在作业存活期内/后都可用
+  // Final persistent data read back via execfs (marker written by the job), proving degraded reads work both during and after the job lifetime
   const markerText = await fsF.readText(marker).catch(() => '');
   check('fallback post-job persistent read (marker)', markerText.trim() === 'MARKER-OK', JSON.stringify(markerText));
   const leftoverNames = (await fsF.listDir(JOB_DIR).catch(() => [])).map((e) => e.name);

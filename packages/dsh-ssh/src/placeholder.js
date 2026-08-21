@@ -52,7 +52,7 @@ export function hostDisplayName(hosts, hostId) {
 
 /**
  * Placeholder workspace title: host display name / basename (e.g. ubuntu /
- * opencode-api), so the sidebar can tell which host each workspace belongs to.
+ * my-project), so the sidebar can tell which host each workspace belongs to.
  * The host name is prefixed because a bare basename is ambiguous across hosts.
  * @param remotePath remote absolute path (its basename is used).
  * @param hostDisplayName host display name from {@link hostDisplayName}.

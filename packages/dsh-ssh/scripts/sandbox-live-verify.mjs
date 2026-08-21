@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// @dsh-ssh/dsh-ssh P0 直连实测: 真实 SSH(ubuntu) + 不同 sandboxMode 的 fake exec/ctx,
-// 验证远端 write 的 sandbox 语义。仅写 /tmp/dsh-ssh-verify-sandbox(工作区)与 /tmp/dsh-ssh-verify-outside.txt,
-// 结束统一清理。内存 config(不落 ~/.dsh/settings.yaml, known_hosts 用独立校验文件)。
+// @dsh-ssh/dsh-ssh direct live verification: real SSH (ubuntu) + different sandboxMode fake exec/ctx,
+// verifies remote write sandbox semantics. Only writes <remoteRoot>-sandbox (workspace) and <remoteRoot>-outside.txt,
+// cleans up uniformly at the end. In-memory config (does not write ~/.dsh/settings.yaml, known_hosts uses isolated verification file).
 // PREREQ: reachable test remote (defaults + DSH_SSH_TEST_* overrides in test/live-config.mjs).
 // Switch machines by exporting the DSH_SSH_TEST_* vars; touches only /tmp/dsh-ssh-* on the remote.
 import os from 'node:os';
@@ -18,7 +18,7 @@ const HOST_ID = 'live';
 const REMOTE_CWD = liveConfig.remoteRoot + '-sandbox';
 const OUTSIDE = liveConfig.remoteRoot + '-outside.txt';
 
-// 主机/私钥统一来自 live-config(A.38); 私钥默认 id_ed25519, DSH_SSH_TEST_KEY_PATH 可覆盖。
+// Host/private-key config comes from live-config; defaults to id_ed25519, overridable via DSH_SSH_TEST_KEY_PATH.
 const cfg = {
   ...liveHostConfig({ id: HOST_ID }),
   name: 'sandbox live verify',
@@ -70,14 +70,14 @@ function check(name, cond, detail) {
 
 const conn = await pool.acquire(cfg);
 try {
-  // prep: 清理并重建工作区
+  // prep: clean and recreate workspace
   await conn.exec('rm -rf ' + REMOTE_CWD + ' ' + OUTSIDE);
   const mk = await conn.exec('mkdir -p ' + REMOTE_CWD);
   check('mkdir workspace', mk.code === 0, mk.stderr.trim());
 
   const exec = makeExec();
 
-  // 1. workspace-write 区内写放行
+  // 1. workspace-write inside-workspace write allowed
   {
     const ctx = makeCtx('workspace-write');
     apply(ctx);
@@ -85,7 +85,7 @@ try {
     check('workspace-write 区内写放行', out.path === REMOTE_CWD + '/inside.txt', out.path);
   }
 
-  // 2. workspace-write 区外写拒绝 + denial 形状
+  // 2. workspace-write outside-workspace write denied + denial shape
   {
     const ctx = makeCtx('workspace-write');
     apply(ctx);
@@ -98,7 +98,7 @@ try {
     check('denial 含升级 hint', err !== undefined && err.message.includes('[sandbox: escalation available — retry this exact operation once'), '');
   }
 
-  // 3. read-only 区内写也拒绝
+  // 3. read-only inside-workspace write also denied
   {
     const ctx = makeCtx('read-only');
     apply(ctx);
@@ -109,7 +109,7 @@ try {
     check('read-only 区内写拒绝', err !== undefined && err.code === 'FS_SANDBOX_DENIED' && err.message.startsWith('[sandbox: file access denied under read-only mode]'), err ? err.code : 'NO ERROR (BUG)');
   }
 
-  // 4. 升级重试放行 (workspace-write + 区外 + sandbox_permissions=danger-full-access + 审批)
+  // 4. escalation retry allowed (workspace-write + outside + sandbox_permissions=danger-full-access + approval)
   {
     const approval = makeApproval('allowed-once');
     const ctx = makeCtx('workspace-write', approval);
@@ -124,7 +124,7 @@ try {
     check('升级后区外文件真实落盘', ver.stdout.trim() === 'present', ver.stdout.trim());
   }
 
-  // 5. danger-full-access 区外写全放
+  // 5. danger-full-access outside-workspace write fully allowed
   {
     const ctx = makeCtx('danger-full-access');
     apply(ctx);
@@ -134,7 +134,7 @@ try {
     check('danger-full-access 区外文件落盘', ver.stdout.trim() === 'present', ver.stdout.trim());
   }
 
-  // 6. 逃逸路径 (绝对 ../) 在 workspace-write 被拒
+  // 6. escape path (absolute ../) denied under workspace-write
   {
     const ctx = makeCtx('workspace-write');
     apply(ctx);
@@ -147,7 +147,7 @@ try {
 
   // cleanup
   await conn.exec('rm -rf ' + REMOTE_CWD + ' ' + OUTSIDE + ' /tmp/dsh-ssh-verify-escape.txt');
-  console.log('cleaned up /tmp/dsh-ssh-verify-*');
+  console.log('cleaned up ' + REMOTE_CWD + ' ' + OUTSIDE);
 
   if (failures.length > 0) { console.error('SANDBOX-LIVE-FAILED:', failures.join('; ')); process.exit(1); }
   console.log('SANDBOX-LIVE-OK');

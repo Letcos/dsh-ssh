@@ -1,6 +1,6 @@
-// @dsh-ssh/dsh-ssh — C: 能力面声明注入(agent/created)单元测试 (node --test, 无网络/IO)。
-// 验证: buildCapabilitySection 纯函数 / injectCapabilitySurface 走 agent.ctx.systemPrompt.section 官方通道 /
-//       installToolRoutingHook 对远端 cwd 注入、本地 cwd 与 capability:false 零注入 / resolveHostLabel 回退。
+// @dsh-ssh/dsh-ssh — unit tests for capability-surface declaration injection via agent/created (node --test, no network/IO).
+// Verifies: buildCapabilitySection pure function / injectCapabilitySurface via agent.ctx.systemPrompt.section official channel /
+//       installToolRoutingHook injects for remote cwd, zero injection for local cwd and capability:false / resolveHostLabel fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -10,17 +10,17 @@ import { mapRemoteToLocal } from '../src/router.js';
 
 const HOST_ID = '00000000-0000-4000-8000-000000000000';
 process.env.DSH_SSH_REMOTE_ROOT = path.join(os.homedir(), 'dsh-test-remote-root');
-const REMOTE_PATH = '/home/ubuntu/opencode-api';
+const REMOTE_PATH = '/home/devuser/workspace';
 const placeholderCwd = mapRemoteToLocal(HOST_ID, REMOTE_PATH);
 
-// ── buildCapabilitySection(纯函数)──────────────────────────────────────
+// ── buildCapabilitySection (pure function) ──────────────────────────────────────
 test('buildCapabilitySection returns an official-shaped section (name/order/text)', () => {
   const sec = buildCapabilitySection({ kind: 'remote', hostId: HOST_ID, remoteCwd: REMOTE_PATH });
   assert.equal(sec.name, CAPABILITY_SECTION_NAME);
   assert.equal(sec.order, CAPABILITY_SECTION_ORDER);
   assert.ok(Number.isFinite(sec.order));
   assert.equal(typeof sec.text, 'string');
-  // 中文正文覆盖要点: 远端执行业务 / skill 脚本+MCP 在本机 / 本机文件用绝对路径
+  // Chinese text covers: remote execution / skill scripts + MCP on local machine / absolute paths for local files
   assert.match(sec.text, new RegExp(HOST_ID));
   assert.match(sec.text, /远端机器/);
   assert.match(sec.text, /MCP/);
@@ -32,18 +32,18 @@ test('buildCapabilitySection: opts.zh=false → English text; hostLabel interpol
   assert.match(sec.text, /workstation/);
   assert.match(sec.text, /remote machine/);
   assert.match(sec.text, /MCP/);
-  // 默认 zh=true, 且 hostLabel 缺省回退 hostId
+  // Default zh=true and hostLabel falls back to hostId when missing
   assert.match(buildCapabilitySection({ hostId: 'abc' }).text, /「abc」/);
 });
 
-// ── injectCapabilitySurface(官方 per-agent section 通道)────────────────
+// ── injectCapabilitySurface (official per-agent section channel) ────────────────
 function makeSystemPromptAgent(cwd) {
   const registered = [];
   const sp = {
     section: function (s) { registered.push(s); return function () { const i = registered.indexOf(s); if (i >= 0) registered.splice(i, 1); }; }
   };
-  // get: () => undefined —— 远端 cwd 时钩子现在恒注册 bash(决策 remote-shell-follows-remote-platform),
-  // registerRoutedTools 的 buildRoutedToolDefinitions 会读 ctx.get('shell')/ctx.get('fs') 判沙箱模式。
+  // get: () => undefined — for remote cwd the hook always registers bash (remote shell follows remote platform);
+  // buildRoutedToolDefinitions in registerRoutedTools reads ctx.get('shell')/ctx.get('fs') to determine sandbox mode.
   const ctx = { systemPrompt: sp, tools: { get: () => undefined, register: () => () => {} }, get: () => undefined };
   return { agent: { session: { header: { cwd } }, ctx }, registered };
 }
@@ -68,12 +68,12 @@ test('injectCapabilitySurface uses opts.section when provided and never throws o
   const { agent, registered } = makeSystemPromptAgent(placeholderCwd);
   injectCapabilitySurface(agent, { hostId: HOST_ID }, { section: custom });
   assert.deepEqual(registered, [custom]);
-  // section() 抛错 → 返回 null, 不外抛(veto 保护)
+  // section() throwing → returns null, does not propagate (veto protection)
   agent.ctx.systemPrompt.section = () => { throw new Error('boom'); };
   assert.equal(injectCapabilitySurface(agent, { hostId: HOST_ID }), null);
 });
 
-// ── installToolRoutingHook 集成: 注入只发生在远端 cwd ───────────────────
+// ── installToolRoutingHook integration: injection only for remote cwd ───────────────────
 function makeHostCtx() {
   let handler = null;
   const warns = [];
@@ -98,7 +98,7 @@ test('hook: remote placeholder cwd → capability section injected (even with no
 test('hook: local cwd → capability section NOT injected (zero impact)', () => {
   const host = makeHostCtx();
   installToolRoutingHook(host);
-  const { agent, registered } = makeSystemPromptAgent('/Users/haowu/project');
+  const { agent, registered } = makeSystemPromptAgent('/home/devuser/project');
   host._handler()({ agent });
   assert.equal(registered.length, 0, 'local cwd must not inject capability surface');
 });
@@ -119,11 +119,11 @@ test('hook: remote cwd with no systemPrompt service → no throw, no registratio
   assert.doesNotThrow(() => host._handler()({ agent }));
 });
 
-// ── resolveHostLabel(回退)──────────────────────────────────────────────
+// ── resolveHostLabel (fallback) ──────────────────────────────────────────────
 test('resolveHostLabel returns null without settings or unknown host', () => {
   assert.equal(resolveHostLabel(null, HOST_ID), null);
   assert.equal(resolveHostLabel({}, HOST_ID), null);
-  // settings.get 抛错 → 回退 null
+  // settings.get throwing → fallback to null
   const bad = { settings: { get: () => { throw new Error('x'); } } };
   assert.equal(resolveHostLabel(bad, HOST_ID), null);
 });

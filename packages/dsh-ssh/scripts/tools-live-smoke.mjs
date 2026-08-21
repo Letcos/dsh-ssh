@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// @dsh-ssh/dsh-ssh M3b+M3c live smoke: real SSH against the test remote, exercising the
+// @dsh-ssh/dsh-ssh live smoke: real SSH against the test remote, exercising the
 // exact SSH primitives the remote tools use — exec (bash), SFTP writeFileAtomic
-// (atomic temp+rename), stat/readText (read), a read→replace→write round-trip
-// (edit), and the M3c search commands (remote find / grep -rn via
+// (atomic temp+rename), stat/readText (read), a read->replace->write round-trip
+// (edit), and the search commands (remote find / grep -rn via
 // buildRemoteGlobCommand/buildRemoteGrepCommand, parsed exactly like the tools).
 // In-memory config ONLY — never writes ~/.dsh/settings.yaml and never
 // touches the user's ~/.ssh/known_hosts (verification file is
@@ -16,23 +16,25 @@ import { buildRemoteGlobCommand, buildRemoteGrepCommand, parseGlobOutput, parseG
 import { liveConfig, liveHostConfig, requireRealHost } from '../test/live-config.mjs';
 requireRealHost('scripts/tools-live-smoke');
 
-// 主机/私钥统一来自 live-config(A.38); 私钥默认 id_ed25519, DSH_SSH_TEST_KEY_PATH 可覆盖。
+// Host/private-key config comes from live-config; defaults to id_ed25519, overridable via DSH_SSH_TEST_KEY_PATH.
 const cfg = {
   ...liveHostConfig({ id: 'tools-live-smoke' }),
   name: 'tools live smoke',
   knownHostsPath: '/tmp/dsh-ssh-test-known_hosts',
-  acceptNew: true, // 仅本脚本兜底
+  acceptNew: true, // fallback for this script only
   connectTimeoutMs: 10_000,
 };
 
-const remoteDir = liveConfig.remoteRoot + '-m3b-' + process.pid;
+const remoteDir = liveConfig.remoteRoot + '-smoke-' + process.pid;
 const remoteFile = remoteDir + '/hello.txt';
 
-function fail(msg) { console.error('TOOLS-LIVE-SMOKE-FAILED:', msg); process.exit(1); }
+function fail(msg) { throw new Error(msg); }
 
 const pool = new SshPool({ maxConnections: 1 });
+let conn = null;
+let failed = false;
 try {
-  const conn = await pool.acquire(cfg);
+  conn = await pool.acquire(cfg);
 
   // 1. bash: exec 'echo hi'
   const r = await conn.exec('echo hi; hostname');
@@ -41,11 +43,11 @@ try {
 
   const sftp = await conn.sftp();
 
-  // 1.5 mkdir: 远端父目录必须先存在(与真实文件写入语义一致)
+  // 1.5 mkdir: remote parent dir must exist first (matches real file write semantics)
   const mk = await conn.exec('mkdir -p ' + shellQuoteSingle(remoteDir));
   if (mk.code !== 0) fail('mkdir remote dir: ' + mk.stderr.trim());
 
-  // 2. write → 原子写(临时文件 + rename)
+  // 2. write -> atomic write (temp file + rename)
   await sftp.writeFileAtomic(remoteFile, Buffer.from('hello\nworld\n', 'utf8'));
   console.log('writeFileAtomic ->', remoteFile);
 
@@ -57,17 +59,17 @@ try {
   console.log('read:', JSON.stringify(text1));
   if (text1 !== 'hello\nworld\n') fail('read back mismatch: ' + JSON.stringify(text1));
 
-  // 4. edit → 读→改→写回→再读(与 tools.js 的 read-modify-write 往返一致)
+  // 4. edit -> read->modify->write->read again (matches tools.js read-modify-write round-trip)
   const edited = text1.replace('hello', 'goodbye');
   await sftp.writeFileAtomic(remoteFile, Buffer.from(edited, 'utf8'));
   const text2 = (await sftp.readBytes(remoteFile)).toString('utf8');
   console.log('edit round-trip:', JSON.stringify(text2));
   if (text2 !== 'goodbye\nworld\n') fail('edit round-trip mismatch: ' + JSON.stringify(text2));
 
-  // ── M3c: glob / grep 远端搜索(live smoke; 命令与工具远端分支同款)──
-  // 测试树: a.txt(hello world) / b.log(hello log) / src/c.txt(hello again)
+  // ── glob / grep remote search (live smoke; same commands as tool remote branches) ──
+  // Test tree: a.txt(hello world) / b.log(hello log) / src/c.txt(hello again)
   //         / src/sub/d.txt(hello deep) / .hidden/h.txt(hello hidden) / .git/config(hello git)
-  // 预期: glob 含隐藏不含 .git; grep 默认跳过隐藏与 .git, include 只搜 basename 匹配。
+  // Expected: glob includes hidden but excludes .git; grep skips hidden and .git by default, include matches basename only.
   const mkSearch = await conn.exec(
     'mkdir -p ' + shellQuoteSingle(remoteDir + '/src/sub') + ' ' + shellQuoteSingle(remoteDir + '/.hidden') + ' ' + shellQuoteSingle(remoteDir + '/.git'),
   );
@@ -82,7 +84,7 @@ try {
   await writeText('.hidden/h.txt', 'hello hidden\n');
   await writeText('.git/config', 'hello git\n');
 
-  // 6. glob '*.txt': find 枚举 + 本地 rg 语义过滤; 应命中 4 个(a.txt 最先创建 → mtime 序首条)
+  // 6. glob '*.txt': find enumeration + local rg semantic filtering; should match 4 (a.txt created earliest -> mtime-ordered head)
   const globCmd = buildRemoteGlobCommand(remoteDir, '*.txt');
   const g = await conn.exec(globCmd, { cwd: remoteDir, timeoutMs: 30000 });
   if (g.code !== 0) fail('glob exec: ' + g.stderr.trim());
@@ -92,13 +94,13 @@ try {
     if (rgGlobToRegExp('*.txt').test(display)) globPaths.push(display);
   }
   console.log('glob *.txt ->', globPaths.join(', '));
-  const expectGlob = ['hello.txt', 'a.txt', '.hidden/h.txt', 'src/c.txt', 'src/sub/d.txt']; // hello.txt 是 M3b 阶段写下的文件, 同样应命中
+  const expectGlob = ['hello.txt', 'a.txt', '.hidden/h.txt', 'src/c.txt', 'src/sub/d.txt']; // hello.txt was created earlier, should also match
   for (const p of expectGlob) if (!globPaths.includes(p)) fail('glob missing ' + p);
   if (globPaths.some((p) => p.includes('.git'))) fail('glob must exclude .git');
   if (globPaths.length !== expectGlob.length) fail('glob extra paths: ' + globPaths.join(','));
   if (globPaths[0] !== 'hello.txt') fail('glob mtime head should be hello.txt (created first), got ' + globPaths[0]);
 
-  // 7. glob 'src/**/*.txt': 相对 cwd 语义 + 零段 **; 只命中 src 下两个
+  // 7. glob 'src/**/*.txt': relative cwd semantics + zero-segment **; matches only two under src
   const g2 = await conn.exec(buildRemoteGlobCommand(remoteDir, 'src/**/*.txt'), { cwd: remoteDir, timeoutMs: 30000 });
   if (g2.code !== 0) fail('glob src exec: ' + g2.stderr.trim());
   const globPaths2 = [];
@@ -109,7 +111,7 @@ try {
   console.log('glob src/**/*.txt ->', globPaths2.join(', '));
   if (globPaths2.length !== 2 || !globPaths2.includes('src/sub/d.txt')) fail('glob src/**/*.txt wrong: ' + globPaths2.join(','));
 
-  // 8. grep 'hello': 命中 4 个(b.log 含 hello; .hidden/.git 被排除), 路径为 cwd 相对
+  // 8. grep 'hello': 4 matches (b.log contains hello; .hidden/.git excluded), paths relative to cwd
   const grepCmd = buildRemoteGrepCommand(remoteDir, 'hello', undefined);
   const gr = await conn.exec(grepCmd, { cwd: remoteDir, timeoutMs: 30000 });
   if (gr.code !== 0 && gr.code !== 1) fail('grep exec: ' + gr.stderr.trim());
@@ -118,33 +120,34 @@ try {
   }));
   console.log('grep hello ->', JSON.stringify(matches));
   const matchPaths = matches.map((m) => m.path).sort();
-  // hello.txt 在 M3b edit 往返中已改为 'goodbye\nworld\n', 不再含 hello —— grep 正确排除
+  // hello.txt was changed to 'goodbye\nworld\n' earlier, no longer contains hello — correctly excluded by grep
   if (matchPaths.join('|') !== 'a.txt|b.log|src/c.txt|src/sub/d.txt') fail('grep paths wrong: ' + matchPaths.join('|'));
   if (matches.some((m) => m.path.includes('.hidden') || m.path.includes('.git'))) fail('grep must skip hidden/VCS');
   if (matches.some((m) => m.lineNumber !== 1)) fail('grep line numbers wrong');
 
-  // 9. grep include 过滤: 只搜 *.txt → b.log 被排除
+  // 9. grep include filter: only search *.txt -> b.log excluded
   const gri = await conn.exec(buildRemoteGrepCommand(remoteDir, 'hello', '*.txt'), { cwd: remoteDir, timeoutMs: 30000 });
   if (gri.code !== 0 && gri.code !== 1) fail('grep include exec: ' + gri.stderr.trim());
   const mi = parseGrepOutput(gri.stdout).map((m) => toWorkdirRelative(m.path, remoteDir)).sort();
   console.log('grep hello --include=*.txt ->', mi.join(', '));
   if (mi.join('|') !== 'a.txt|src/c.txt|src/sub/d.txt') fail('grep include wrong: ' + mi.join('|'));
 
-  // 10. grep 无命中 → exit 1(工具映射为空 matches, 非错误)
+  // 10. grep no match -> exit 1 (tool maps to empty matches, not an error)
   const grz = await conn.exec(buildRemoteGrepCommand(remoteDir, 'zzzz-not-found', undefined), { cwd: remoteDir, timeoutMs: 30000 });
   if (grz.code !== 1) fail('grep no-match expected exit 1, got ' + grz.code);
 
-  // cleanup: 整树删除(含 hello.txt 与搜索树)
-  const rm = await conn.exec('rm -rf ' + shellQuoteSingle(remoteDir));
-  if (rm.code !== 0) fail('rm -rf cleanup: ' + rm.stderr.trim());
-  console.log('cleaned up', remoteDir);
-
   console.log('TOOLS-LIVE-SMOKE-OK');
-  process.exit(0);
 } catch (err) {
+  failed = true;
   console.error('TOOLS-LIVE-SMOKE-FAILED:', err?.message ?? err);
   if (err?.stage) console.error('stage:', err.stage, 'hostId:', err.hostId);
-  process.exit(1);
 } finally {
-  await pool.dispose();
+  // Remove the whole tree (including hello.txt and search tree) on both success and failure paths.
+  if (conn) {
+    try { await conn.exec('rm -rf ' + shellQuoteSingle(remoteDir)); } catch { /* best effort */ }
+    console.log('cleaned up', remoteDir);
+  }
+  await pool.dispose().catch(() => {});
 }
+if (failed) process.exit(1);
+process.exit(0);

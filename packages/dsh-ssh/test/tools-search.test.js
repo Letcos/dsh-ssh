@@ -1,6 +1,6 @@
-// @dsh-ssh/dsh-ssh — M3c glob/grep tests (node --test, no network).
-// 覆盖: rg 语义翻译纯函数(语义按官方 rg 实测, 2025-08-16)、远端命令构造、输出解析、
-//       保留/渲染/present 投影、mock pool 的远端分支(含错误词表)、本地委托。
+// @dsh-ssh/dsh-ssh — glob/grep tests (node --test, no network).
+// Covers: rg semantic translation pure functions (verified against official rg, 2025-08-16), remote command building, output parsing,
+//       retained/render/present projections, mock pool remote branches (with error codes), and local delegation.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { apply } from '../tools.js';
@@ -19,7 +19,7 @@ import {
 process.env.DSH_SSH_REMOTE_ROOT = '/tmp/dsh-ssh-test-remote-root';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// A. rg glob → RegExp 语义(与官方 rg --files 实测一致, 2025-08-16)
+// rg glob -> RegExp semantics (verified against official rg --files, 2025-08-16)
 // ═══════════════════════════════════════════════════════════════════════════
 const re = (p) => rgGlobToRegExp(p);
 
@@ -91,7 +91,7 @@ test('glob: regex source is anchored', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// B. 远端命令构造
+// Remote command construction
 // ═══════════════════════════════════════════════════════════════════════════
 test('globBasenameForFind: basename filter is a conservative superset', () => {
   assert.deepEqual(globBasenameForFind('*.ts'), ['*.ts']);
@@ -123,7 +123,7 @@ test('buildRemoteGrepCommand: portable flags, hidden/binary excludes, quoting', 
   const cmd = buildRemoteGrepCommand('/data/w', 'foo', undefined);
   assert.ok(cmd.startsWith('grep -rInHE'));
   assert.ok(cmd.includes("--exclude-dir='.*'"), 'hidden dirs excluded');
-  assert.ok(!cmd.includes("--exclude='.*'"), 'no file-level exclude (GNU/BSD quirk, see A.6)');
+  assert.ok(!cmd.includes("--exclude='.*'"), 'no file-level exclude (GNU/BSD quirk)');
   assert.ok(cmd.includes("--exclude-dir='.*'"));
   assert.ok(cmd.includes("-e 'foo'"));
   assert.ok(cmd.includes("'/data/w'"));
@@ -156,7 +156,7 @@ test('buildRemoteGrepCommand rejects newline/NUL patterns', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// C. 输出解析
+// Output parsing
 // ═══════════════════════════════════════════════════════════════════════════
 test('parseGrepOutput: path:line:content with best-effort colon handling', () => {
   const out = parseGrepOutput('/data/w/a.ts:3:hello world\n/data/w/b:4:x:y\nnot-a-match\n');
@@ -164,7 +164,7 @@ test('parseGrepOutput: path:line:content with best-effort colon handling', () =>
     { path: '/data/w/a.ts', lineNumber: 3, line: 'hello world' },
     { path: '/data/w/b', lineNumber: 4, line: 'x:y' },
   ]);
-  // 路径含 ':'(罕见)按首个 ':数字:' 切分
+  // Path containing ':' split at first ':<digits>:'
   const colonPath = parseGrepOutput('a:b.txt:3:hello');
   assert.deepEqual(colonPath, [{ path: 'a:b.txt', lineNumber: 3, line: 'hello' }]);
 });
@@ -178,7 +178,7 @@ test('parseGlobOutput: mtime+path and plain fallback lines', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// D. 保留/渲染/present(官方 shape)
+// Retention/render/present (official shape)
 // ═══════════════════════════════════════════════════════════════════════════
 test('retainGrepMatches caps head and previews long lines', () => {
   const matches = [1, 2, 3].map((n) => ({ path: 'a.ts', lineNumber: n, line: 'x'.repeat(100) }));
@@ -191,7 +191,7 @@ test('retainGrepMatches caps head and previews long lines', () => {
 });
 
 test('previewLine keeps UTF-8 boundaries', () => {
-  const line = '你'.repeat(10); // 3 bytes per char
+  const line = '你'.repeat(10); // 3 bytes per char (kept as data to test UTF-8 boundaries)
   const out = previewLine(line, 9);
   assert.equal(Buffer.byteLength(out.split(' (line truncated)')[0], 'utf8'), 9);
 });
@@ -256,7 +256,7 @@ test('toWorkdirRelative: workdir-relative display, outside paths pass through', 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// E. 远端分支(mock pool; 与 tools-remote.test.js 同款内存池)
+// Remote branches (mock pool; same in-memory pool as tools-remote.test.js)
 // ═══════════════════════════════════════════════════════════════════════════
 function makeCtx({ hosts = {}, sshPool, officialTools = {} } = {}) {
   const registered = new Map();
@@ -292,7 +292,7 @@ function makePool(execImpl) {
   return { pool: { acquire: async () => conn, release: () => {} }, conn };
 }
 
-const HOSTS = { h1: { id: 'h1', host: '1.2.3.4', port: 22, user: 'u', auth: { type: 'key' } } };
+const HOSTS = { h1: { id: 'h1', host: '203.0.113.10', port: 22, user: 'u', auth: { type: 'key' } } };
 
 test('remote glob: find output → filtered workdir-relative paths + root', async () => {
   const { pool } = makePool(async () => ({ code: 0, signal: null, stdout: '1000.5\t/data/work/a.ts\n2000.5\t/data/work/sub/b.ts\n3000.5\t/data/work/c.txt\n', stderr: '' }));
@@ -303,7 +303,7 @@ test('remote glob: find output → filtered workdir-relative paths + root', asyn
 });
 
 test('remote glob: local matcher drops find-superset extras (path scoping)', async () => {
-  // find -name *.test.js 是超集; 本地必须丢弃 src 之外的命中
+  // find -name *.test.js is a superset; local must discard hits outside src
   const { pool } = makePool(async () => ({ code: 0, signal: null, stdout: '1000\t/data/work/src/x.test.ts\n2000\t/data/work/other/y.test.ts\n', stderr: '' }));
   const ctx = makeCtx({ hosts: HOSTS, sshPool: pool });
   apply(ctx);
@@ -411,7 +411,7 @@ test('remote glob/grep: unknown hostId → clear config error', async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// F. 本地委托(逐字节一致, 硬约束 4)
+// Local delegation (byte-identical)
 // ═══════════════════════════════════════════════════════════════════════════
 test('local glob/grep delegate to official implementations with same args+exec', async () => {
   const ctx = makeCtx({
@@ -422,7 +422,7 @@ test('local glob/grep delegate to official implementations with same args+exec',
   });
   apply(ctx);
   const args = { pattern: '*.ts' };
-  const exec = { agent: { session: { header: { cwd: '/Users/haowu/project' } } }, signal: undefined };
+  const exec = { agent: { session: { header: { cwd: '/home/devuser/project' } } }, signal: undefined };
   const out = await ctx._registered.get('glob').execute(args, exec);
   assert.deepEqual(out, { root: '.', paths: ['a.ts'] });
   assert.equal(ctx._calls[0].name, 'glob');
@@ -436,7 +436,7 @@ test('local glob/grep delegate to official implementations with same args+exec',
 test('local glob/grep missing official tool → clear error', async () => {
   const ctx = makeCtx({});
   apply(ctx);
-  const exec = { agent: { session: { header: { cwd: '/Users/haowu/project' } } }, signal: undefined };
+  const exec = { agent: { session: { header: { cwd: '/home/devuser/project' } } }, signal: undefined };
   await assert.rejects(ctx._registered.get('glob').execute({ pattern: '*' }, exec), /unavailable locally/);
   await assert.rejects(ctx._registered.get('grep').execute({ pattern: 'x' }, exec), /unavailable locally/);
 });

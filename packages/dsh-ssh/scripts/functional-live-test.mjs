@@ -1,36 +1,38 @@
 #!/usr/bin/env node
-// @dsh-ssh/dsh-ssh 功能+兼容性实测套件 (functional-live-test.mjs)
+// @dsh-ssh/dsh-ssh functional + compatibility live test suite (functional-live-test.mjs)
 // ============================================================================
-// 在真实远端上系统性实测 @dsh-ssh/dsh-ssh 现有能力:
-//   A. ssh-core 原语级(exec / SFTP / 断线重连 / 并发)
-//   B. tools.js 远端分支(bash/read/write/edit/read_image 用真实 SshPool + 最小 mock ctx)
-//   C. 兼容性矩阵数据(环境信息采集)
-// 产物: 本套件 + .agents/notes/research/compat-matrix.md(数据来源即本套件输出)。
+// Systematically exercises @dsh-ssh/dsh-ssh capabilities on a real remote:
+//   A. ssh-core primitives (exec / SFTP / reconnect / concurrency)
+//   B. tools.js remote branches (bash/read/write/edit/read_image with real SshPool + minimal mock ctx)
+//   C. compatibility matrix data (environment collection)
+// Output: this suite + .agents/notes/research/2026-08-20-compat-matrix.md (sourced from this suite's output).
 //
-// 硬约束(与仓库 agents.md / 任务书一致):
-//   * 只读现有代码(import 运行时取最新版, 不修改任何文件);
-//   * 不写 ~/.dsh/settings.yaml(纯内存配置);
-//   * 不碰用户 ~/.ssh/known_hosts(校验文件固定 /tmp/dsh-ssh-test-known_hosts;
-//     acceptNew 仅本脚本兜底, 与 scripts/live-smoke.mjs 一致);
-//   * 远端只碰 /tmp 下自建目录并在结束时清理;
-//   * 不启动任何 DSH 服务进程; 不碰 /opt/homebrew checkout。
+// Hard constraints (consistent with agents.md):
+//   * read-only on existing code (imports resolve to latest at runtime, no file modifications);
+//   * do not write ~/.dsh/settings.yaml (in-memory config only);
+//   * do not touch user ~/.ssh/known_hosts (verification file is fixed at /tmp/dsh-ssh-test-known_hosts;
+//     acceptNew is a fallback for this script only, same as scripts/live-smoke.mjs);
+//   * on the remote, only touch self-created dirs under /tmp and clean up on exit;
+//   * do not start any DSH service processes; do not modify the DSH core checkout.
 //
-// 用法:   cd packages/@dsh-ssh/dsh-ssh && node scripts/functional-live-test.mjs
+// Usage:   cd packages/dsh-ssh && node scripts/functional-live-test.mjs
 // PREREQ: reachable test remote (defaults + DSH_SSH_TEST_* overrides in test/live-config.mjs).
 // Switch machines by exporting the DSH_SSH_TEST_* vars; touches only /tmp/dsh-ssh-* on the remote.
-// 环境:   DSH_SSH_TEST_KEY_PATH(默认 ~/.ssh/id_ed25519)
-// 输出:   每用例 PASS/FAIL(含耗时/关键数据) + 汇总表; 任一 FAIL → 退出码 1;
-//         全绿 → 打印 FUNCTIONAL-LIVE-TEST-OK。
+// Env:   DSH_SSH_TEST_KEY_PATH (default ~/.ssh/id_ed25519)
+//        DSH_SSH_TEST_MACOS_PORT (second host SSH port; when unset the macOS section is skipped),
+//        DSH_SSH_TEST_MACOS_USER (second host login user, default testuser).
+// Output:   per-case PASS/FAIL (with timing/key data) + summary; any FAIL -> exit 1;
+//         all green -> print FUNCTIONAL-LIVE-TEST-OK.
 // ============================================================================
 import { SshPool, SshError, SftpWrapper, shellQuoteSingle, buildRemoteCommand } from '../src/ssh-core.js';
-import { ExecFs } from '../src/exec-fs.js'; // A.36: SFTP 禁用 → exec 降级层
+import { ExecFs } from '../src/exec-fs.js'; // SFTP disabled -> exec fallback layer
 import { apply } from '../tools.js';
 import { mapRemoteToLocal } from '../src/router.js';
 import { readFile } from 'node:fs/promises';
 import { liveConfig, requireRealHost } from '../test/live-config.mjs';
 requireRealHost('scripts/functional-live-test');
 
-// ── 环境/主机配置(内存配置, 不落 settings; 主机/私钥统一来自 live-config, A.38) ──
+// ── Environment/host config (in-memory, not persisted; host/key unified from live-config) ──
 const KEY_PATH = liveConfig.keyPath;
 const KNOWN_HOSTS = '/tmp/dsh-ssh-test-known_hosts';
 process.env.DSH_SSH_REMOTE_ROOT = '/tmp/dsh-ssh-flt-placeholder-' + process.pid;
@@ -39,14 +41,17 @@ const mkCfg = (id, host, port, user) => ({
   id, name: id, host, port, user,
   auth: { type: 'key', privateKeyPath: KEY_PATH },
   knownHostsPath: KNOWN_HOSTS,
-  acceptNew: true, // 仅本脚本兜底(文件已含主机 key)
+  acceptNew: true, // fallback for this script only (file already contains host key)
   connectTimeoutMs: 10_000,
 });
 const UBUNTU = mkCfg('ubuntu-live', liveConfig.host, liveConfig.port, liveConfig.user);
-const MACOS = mkCfg('macos-live', liveConfig.host, 16611, 'haowu');
+// macOS is an optional second host on the same address but a different SSH port.
+// It is exercised only when DSH_SSH_TEST_MACOS_PORT is set; otherwise the macOS section is skipped.
+const HAS_MACOS = process.env.DSH_SSH_TEST_MACOS_PORT !== undefined && process.env.DSH_SSH_TEST_MACOS_PORT !== '';
+const MACOS = mkCfg('macos-live', liveConfig.host, Number(process.env.DSH_SSH_TEST_MACOS_PORT), process.env.DSH_SSH_TEST_MACOS_USER || 'testuser');
 const UNREACH = { ...mkCfg('unreach', '127.0.0.1', 1, 'nobody'), connectTimeoutMs: 5_000 };
 
-// ── 测试基座 ──────────────────────────────────────────────────────────────
+// ── Test harness ──────────────────────────────────────────────────────────────
 const results = [];
 let passed = 0, failed = 0;
 const KNOWN_BUG_TAG = '[KNOWN-BUG: readBytes-pipeline-duplication]';
@@ -56,7 +61,7 @@ function assertEq(actual, expected, label) {
   if (actual !== expected) throw new Error(label + ': expected ' + JSON.stringify(expected) + ' got ' + JSON.stringify(actual));
 }
 
-// 判断 buf 是否恰好是 base(长度 n)的整数倍重复 —— readBytes 流水线 bug 的特征形态
+// Check whether buf is an exact N-times repeat of base (length n) — the duplicated-content shape this suite detects.
 function isExactRepeat(buf, n) {
   if (n <= 0 || buf.length % n !== 0 || buf.length === n) return false;
   const base = buf.subarray(0, n);
@@ -65,15 +70,15 @@ function isExactRepeat(buf, n) {
   }
   return true;
 }
-// readBytes 一致性断言: 遇"精确 N 倍重复"或"等长错位"形态 → 抛已知 bug 标记错误
+// readBytes consistency assertion: on duplicated-content or same-length-misaligned shapes, throw the known-bug marker.
 function assertBytesEqual(actual, expected, label) {
   const exp = Buffer.isBuffer(expected) ? expected : Buffer.from(expected);
   if (actual.length === exp.length && actual.equals(exp)) return;
   if (isExactRepeat(actual, exp.length)) {
-    throw new Error(KNOWN_BUG_TAG + ' ' + label + ': readBytes 返回 ' + actual.length + ' 字节 = ' + (actual.length / exp.length) + '× ' + exp.length + '(流水线 readBytes 以同一 offset 并发发出 16 个请求, offset 只在回调里递增)');
+    throw new Error(KNOWN_BUG_TAG + ' ' + label + ': readBytes 返回 ' + actual.length + ' 字节 = ' + (actual.length / exp.length) + '× ' + exp.length + '(检测到内容重复污染)');
   }
   if (actual.length === exp.length) {
-    throw new Error(KNOWN_BUG_TAG + ' ' + label + ': readBytes 返回等长但内容错位 ' + actual.length + ' 字节(流水线 readBytes 按回调完成顺序 push chunk, 而 ssh2 内部以 _maxReadLen 拆子请求, 近 EOF 的短读提前完成 → chunk 乱序拼接)');
+    throw new Error(KNOWN_BUG_TAG + ' ' + label + ': readBytes 返回等长但内容错位 ' + actual.length + ' 字节(检测到内容错位污染)');
   }
   throw new Error(label + ': readBytes 返回 ' + actual.length + ' 字节, 期望 ' + exp.length);
 }
@@ -93,6 +98,12 @@ async function test(name, fn) {
   }
 }
 
+// macOS cases run only when a second host is configured (DSH_SSH_TEST_MACOS_PORT set).
+async function testMac(name, fn) {
+  if (!HAS_MACOS) { console.log('[skip] ' + name + ': 未配置 macOS 第二主机(未设 DSH_SSH_TEST_MACOS_PORT)'); return; }
+  await test(name, fn);
+}
+
 const cleanup = []; // { conn, dir }
 function trackDir(conn, dir) { cleanup.push({ conn, dir }); }
 async function ensureDir(conn, dir) {
@@ -102,8 +113,17 @@ async function ensureDir(conn, dir) {
 async function rmrf(conn, dir) {
   try { await conn.exec('rm -rf ' + shellQuoteSingle(dir)); } catch { /* best effort */ }
 }
+// Best-effort teardown used on both success and failure paths: removes tracked
+// remote dirs and disposes the pools. References poolA/poolB via module scope.
+async function cleanupAll() {
+  for (const { conn, dir } of cleanup) {
+    try { await conn.exec('rm -rf ' + shellQuoteSingle(dir)); } catch { /* best effort */ }
+  }
+  await poolA.dispose().catch(() => {});
+  if (poolB) await poolB.dispose().catch(() => {});
+}
 
-// ── tools.js 复用: 与 test/tools-remote.test.js 相同的 makeCtx/makeExec 结构 ──
+// ── tools.js reuse: same makeCtx/makeExec structure as test/tools-remote.test.js ──
 function makeCtx({ hosts, sshPool, attachments }) {
   const registered = new Map();
   return {
@@ -129,7 +149,7 @@ const makeExec = (hostId, remotePath) => ({
 });
 const getTool = (ctx, name) => ctx._registered.get(name);
 
-// read_image 附件 mock: 解析 PNG IHDR 得到真实尺寸, 保存字节供校验
+// read_image attachment mock: parse PNG IHDR to get real dimensions, save bytes for verification
 function makeAttachments() {
   const saved = new Map();
   return {
@@ -149,21 +169,34 @@ function makeAttachments() {
   };
 }
 
-// ── 1x1 PNG(base64, 已验证: 70 字节, magic+IHDR 尺寸 1x1) ─────────────────
+// ── 1x1 PNG (base64, verified: 70 bytes, magic+IHDR size 1x1) ─────────────────
 const PNG_1X1_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// A. ssh-core 原语级
+// A. ssh-core primitives
 // ═══════════════════════════════════════════════════════════════════════════
 const poolA = new SshPool({ maxConnections: 2 });
-const connU = await poolA.acquire(UBUNTU);
-const connM = await poolA.acquire(MACOS);
+let poolB = null;
+let connU = null;
+let connM = null;
 const dirU = '/tmp/dsh-ssh-flt-ubuntu-' + process.pid + '-' + Date.now();
 const dirM = '/tmp/dsh-ssh-flt-macos-' + process.pid + '-' + Date.now();
-trackDir(connU, dirU);
-trackDir(connM, dirM);
-await ensureDir(connU, dirU);
-await ensureDir(connM, dirM);
+try {
+  connU = await poolA.acquire(UBUNTU);
+  trackDir(connU, dirU);
+  await ensureDir(connU, dirU);
+  if (HAS_MACOS) {
+    connM = await poolA.acquire(MACOS);
+    trackDir(connM, dirM);
+    await ensureDir(connM, dirM);
+  } else {
+    console.log('[skip] macOS 第二主机未配置(未设 DSH_SSH_TEST_MACOS_PORT), 跳过 macOS 相关用例');
+  }
+} catch (err) {
+  console.error('FUNCTIONAL-LIVE-TEST-SETUP-FAILED: ' + (err?.message ?? err));
+  await cleanupAll();
+  process.exit(1);
+}
 
 console.log('\n── A1 exec 原语 ───────────────────────────────────────────');
 
@@ -209,7 +242,7 @@ await test('A1-5 命令引号/特殊字符转义往返(shellQuoteSingle)', async
   const r = await connU.exec('printf %s ' + shellQuoteSingle(tricky));
   assertEq(r.code, 0, 'exit code');
   assertEq(r.stdout, tricky, 'roundtrip');
-  // buildRemoteCommand: cwd 含空格/引号/中文/$
+  // buildRemoteCommand: cwd contains spaces/quotes/unicode/$
   const wcwd = '/tmp/dsh-ssh-flt-spc \'q\' "d" 中文';
   await ensureDir(connU, wcwd);
   const r2 = await connU.exec('pwd', { cwd: wcwd });
@@ -233,7 +266,7 @@ await test('A1-6 命令注入防御($( ) 与 ; 不逃逸引号)', async () => {
   return { data: 'no file created, literals preserved' };
 });
 
-await test('A1-7 macOS(16611) exec 退出码 + stdout/stderr(zsh 默认 shell)', async () => {
+await testMac('A1-7 macOS exec 退出码 + stdout/stderr(zsh 默认 shell)', async () => {
   const r = await connM.exec('echo mac-ok; echo mac-err >&2; exit 5');
   assertEq(r.code, 5, 'exit code');
   assertEq(r.stdout, 'mac-ok\n', 'stdout');
@@ -241,7 +274,7 @@ await test('A1-7 macOS(16611) exec 退出码 + stdout/stderr(zsh 默认 shell)',
   return { data: 'code=' + r.code + ' (zsh 下 exec 通道正常)' };
 });
 
-await test('A1-8 macOS(16611) exec 超时 → SshError exec-timeout', async () => {
+await testMac('A1-8 macOS exec 超时 → SshError exec-timeout', async () => {
   let caught = null;
   try { await connM.exec('sleep 3', { timeoutMs: 1200 }); } catch (e) { caught = e; }
   assert(caught !== null, 'expected SshError');
@@ -351,7 +384,7 @@ await test('A2-6 不存在文件/目录错误(SshError 字段完整性)', async 
   return { data: 'stat→undefined; readText/readBytes/listDir → SshError(name/hostId/stage/message/cause 齐备)' };
 });
 
-await test('A2-7 macOS(16611) SFTP 特殊文件名+覆盖写+二进制(实测 SFTP 可用)', async () => {
+await testMac('A2-7 macOS SFTP 特殊文件名+覆盖写+二进制(实测 SFTP 可用)', async () => {
   const s = await connM.sftp();
   const names = ['mac space.txt', 'mac中文.txt', "mac's.txt"];
   for (const n of names) {
@@ -360,12 +393,12 @@ await test('A2-7 macOS(16611) SFTP 特殊文件名+覆盖写+二进制(实测 SF
     await s.writeFileAtomic(f, Buffer.from(content, 'utf8'));
     assertEq(await s.readText(f), content, 'roundtrip ' + n);
   }
-  // 覆盖写(APFS + OpenSSH rename 回退)
+  // overwrite (APFS + OpenSSH rename fallback)
   const f2 = dirM + '/mac-overwrite.txt';
   await s.writeFileAtomic(f2, Buffer.from('v1', 'utf8'));
   await s.writeFileAtomic(f2, Buffer.from('v2-mac-longer', 'utf8'));
   assertEq(await s.readText(f2), 'v2-mac-longer', 'overwrite');
-  // 二进制(2KB 随机, 小文件不触发流水线乱序)
+  // binary (2KB random, small file)
   const f3 = dirM + '/mac-rand.bin';
   const b3 = cryptoRandom(2048);
   await s.writeFileAtomic(f3, b3);
@@ -406,7 +439,7 @@ await test('A3-2 dispose 后再用 → SshError not-connected', async () => {
 await test('A3-3 远端人为断开(exec kill -9 $PPID) → 报错 + 重建可用', async () => {
   const pool = new SshPool({ maxConnections: 1 });
   const c = await pool.acquire(UBUNTU);
-  // 杀掉本连接的命令 shell 父进程(sshd session) → 整条 TCP 连接断开
+  // kill the command shell parent (sshd session) of this connection -> entire TCP connection drops
   const r0 = await c.exec('kill -9 $PPID');
   assertEq(r0.code, -1, 'killed channel exit code (-1)');
   let err = null;
@@ -449,23 +482,23 @@ await test('A4-2 maxConnections=1 池排队: 并发 8 个不同 hostId acquire+e
   }));
   const ms = Date.now() - t0;
   for (const r of outs) assertEq(r.code, 0, 'exit');
-  // 实测记录: maxConnections 限制并发建立连接(排队), 但不淘汰已缓存连接
+  // observed: maxConnections limits concurrent connection establishment (queuing), but does not evict cached connections
   const sizes = pool.conns.size;
   await pool.dispose();
   return { data: '8/8 ok in ' + ms + 'ms; conns.size=' + sizes + ' (maxConnections 仅限并发 connect, 不淘汰缓存连接)' };
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// B. tools.js 远端分支(真实 SshPool + 最小 mock ctx)
+// B. tools.js remote branches (real SshPool + minimal mock ctx)
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('\n── B. tools.js 远端分支 ────────────────────────────────────');
-const poolB = new SshPool({ maxConnections: 2 });
+poolB = new SshPool({ maxConnections: 2 });
 const hostsB = { 'ubuntu-live': UBUNTU, 'macos-live': MACOS, 'unreach': UNREACH };
 const attachmentsB = makeAttachments();
 const ctxB = makeCtx({ hosts: hostsB, sshPool: poolB, attachments: attachmentsB });
 apply(ctxB);
 
-const REMOTE_MAX_FILE_BYTES = 10 * 1024 * 1024; // tools.js 常量(远端 read/edit 单文件上界)
+const REMOTE_MAX_FILE_BYTES = 10 * 1024 * 1024; // tools.js constant (remote read/edit per-file upper bound)
 
 console.log('\n── B5 bash 工具 ──────────────────────────────────────────');
 
@@ -526,7 +559,7 @@ await test('B6-1 read 小文件 → 行号窗口 + totalLines', async () => {
   assertEq(out.path, f, 'path');
   assertEq(out.offset, 1, 'offset');
   assertEq(out.totalLines, 3, 'totalLines');
-  // readRemoteText 走 readBytes 拉取整文件; 若被流水线 bug 污染, totalLines 会翻倍
+  // readRemoteText fetches the whole file via readBytes; if polluted by the pipeline bug, totalLines doubles
   if (out.totalLines !== 3) {
     throw new Error(KNOWN_BUG_TAG + ' B6-1: read 工具经 readRemoteText(readBytes) 拉取, totalLines=' + out.totalLines + ' ≠ 3(文本被 ×' + (out.totalLines / 3) + ' 污染)');
   }
@@ -538,7 +571,7 @@ await test('B6-1 read 小文件 → 行号窗口 + totalLines', async () => {
 await test('B6-1b read 工具 300KB 文本(>256KB chunk, 非整倍)→ 行数完整', async () => {
   const s = await connU.sftp();
   const f = dirU + '/read-300k.txt';
-  // 300KB = 256KB + 44KB, 触发流水线近 EOF 短读提前完成 → chunk 乱序
+  // 300KB = 256KB + 44KB, crosses the 256KB chunk boundary.
   const line = 'this is a longer test line 0123456789 abcdefghijklmnopqrstuvwxyz\n';
   const repeat = Math.ceil((300 * 1024) / line.length);
   const text = line.repeat(repeat);
@@ -599,7 +632,7 @@ await test('B7-2 write 覆盖写 → operation=update, 原子替换, 读回一�
     { file_path: f, content: 'NEW CONTENT' }, makeExec('ubuntu-live', dirU));
   assertEq(out.operation, 'update', 'operation');
   assertEq(out.after, 'NEW CONTENT', 'after');
-  // write 的 before 走 readBytes(当前流水线实现) → 若被污染则为重复文本
+  // write's before is fetched via readBytes (current pipeline) -> if polluted it becomes duplicated text
   if (out.before !== 'old content') {
     throw new Error(KNOWN_BUG_TAG + ' B7-2: write before 经 readBytes 拉取, 期望 "old content" 得 ' + JSON.stringify(String(out.before).slice(0, 40)) + '(长度 ' + String(out.before).length + ')');
   }
@@ -726,8 +759,8 @@ await test('B10-2 主机不可达(127.0.0.1:1) → 连接错误(实测: acquire 
   return { data: 'stage=' + err.stage + ' msg=' + err.message + ' (发现: acquire 错误未归一化为工具文案)' };
 });
 
-await test('B10-3 SFTP 不可用降级(A.36)→ read 走 exec 降级(不再抛 sftp-open)', async () => {
-  // 注入内存 exec 降级层: conn.fs() 直接返回 ExecFs(mock 代表“SFTP 禁用 → 已降级”的上层接入点)。
+await test('B10-3 SFTP unavailable fallback -> read via exec fallback (no longer throws sftp-open)', async () => {
+  // Inject in-memory exec fallback layer: conn.fs() directly returns ExecFs (mock represents "SFTP disabled -> already degraded" entry point).
   const memFiles = { '/tmp/x.txt': 'hello\nworld\n' };
   const fsConn = {
     hostId: 'macos-live',
@@ -760,7 +793,7 @@ await test('B10-3 SFTP 不可用降级(A.36)→ read 走 exec 降级(不再抛 s
   return { data: 'degraded; read via exec returned ' + out.lines.length + ' lines' };
 });
 
-await test('B10-4 真实 macOS(16611)文件工具: 写+读(实测 SFTP 可用, 与"SFTP 被禁"前提相反)', async () => {
+await testMac('B10-4 真实 macOS 文件工具: 写+读(实测 SFTP 可用, 与"SFTP 被禁"前提相反)', async () => {
   const f = dirM + '/mac-write.txt';
   const w = await getTool(ctxB, 'write').execute(
     { file_path: f, content: 'mac line1\nmac line2\n' }, makeExec('macos-live', dirM));
@@ -774,52 +807,55 @@ await test('B10-4 真实 macOS(16611)文件工具: 写+读(实测 SFTP 可用, �
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// C. 环境信息采集(兼容性矩阵数据源)
+// C. Environment collection (compatibility matrix data source)
 // ═══════════════════════════════════════════════════════════════════════════
-console.log('\n── C 环境信息 ────────────────────────────────────────────');
 const envData = {};
-for (const [label, cfg] of [['ubuntu', UBUNTU], ['macos', MACOS]]) {
-  const c = label === 'ubuntu' ? connU : connM;
-  const r = await c.exec('ssh -V 2>&1; echo SHELL=$SHELL; uname -srm');
-  const lines = r.stdout.split('\n').filter((l) => l.length > 0);
-  envData[label] = {
-    sshVersion: lines.find((l) => l.startsWith('OpenSSH')) || '(unknown)',
-    shell: lines.find((l) => l.startsWith('SHELL=')) || '(unknown)',
-    uname: lines.find((l) => !l.startsWith('SHELL=') && !l.startsWith('OpenSSH')) || '(unknown)',
+try {
+  console.log('\n── C 环境信息 ────────────────────────────────────────────');
+  const envTargets = [['ubuntu', UBUNTU, connU]];
+  if (HAS_MACOS) envTargets.push(['macos', MACOS, connM]);
+  for (const [label, cfg, c] of envTargets) {
+    const r = await c.exec('ssh -V 2>&1; echo SHELL=$SHELL; uname -srm');
+    const lines = r.stdout.split('\n').filter((l) => l.length > 0);
+    envData[label] = {
+      sshVersion: lines.find((l) => l.startsWith('OpenSSH')) || '(unknown)',
+      shell: lines.find((l) => l.startsWith('SHELL=')) || '(unknown)',
+      uname: lines.find((l) => !l.startsWith('SHELL=') && !l.startsWith('OpenSSH')) || '(unknown)',
+    };
+    const sftpLine = await c.exec('grep -in sftp /etc/ssh/sshd_config /etc/ssh/sshd_config.d/* 2>/dev/null | head -3');
+    envData[label].sftpSubsystem = sftpLine.stdout.trim() || '(未找到显式 Subsystem sftp 行)';
+    console.log('DATA ' + label + ': sshVersion=' + envData[label].sshVersion + ' shell=' + envData[label].shell + ' uname=' + envData[label].uname);
+    console.log('DATA ' + label + ': sftpSubsystem=' + envData[label].sftpSubsystem.split('\n').join(' / '));
+  }
+  const ssh2pkg = JSON.parse(await readFile(new URL('../node_modules/ssh2/package.json', import.meta.url), 'utf8'));
+  envData.ssh2Version = ssh2pkg.version;
+  envData.local = {
+    keyPath: KEY_PATH,
+    sshAgentSocket: process.env.SSH_AUTH_SOCK ? 'set(ssh-agent 运行中)' : 'unset(本机 agent 无身份 → agent 认证未测)',
+    passwordAuth: '未测',
   };
-  const sftpLine = await c.exec('grep -in sftp /etc/ssh/sshd_config /etc/ssh/sshd_config.d/* 2>/dev/null | head -3');
-  envData[label].sftpSubsystem = sftpLine.stdout.trim() || '(未找到显式 Subsystem sftp 行)';
-  console.log('DATA ' + label + ': sshVersion=' + envData[label].sshVersion + ' shell=' + envData[label].shell + ' uname=' + envData[label].uname);
-  console.log('DATA ' + label + ': sftpSubsystem=' + envData[label].sftpSubsystem.split('\n').join(' / '));
-}
-const ssh2pkg = JSON.parse(await readFile(new URL('../node_modules/ssh2/package.json', import.meta.url), 'utf8'));
-envData.ssh2Version = ssh2pkg.version;
-envData.local = {
-  keyPath: KEY_PATH,
-  sshAgentSocket: process.env.SSH_AUTH_SOCK ? 'set(ssh-agent 运行中)' : 'unset(本机 agent 无身份 → agent 认证未测)',
-  passwordAuth: '未测',
-};
-console.log('DATA ssh2Version=' + envData.ssh2Version);
-console.log('DATA local: keyPath=' + envData.local.keyPath + ' agent=' + envData.local.sshAgentSocket + ' password=未测');
+  console.log('DATA ssh2Version=' + envData.ssh2Version);
+  console.log('DATA local: keyPath=' + envData.local.keyPath + ' agent=' + envData.local.sshAgentSocket + ' password=未测');
 
-// ── 汇总 ──────────────────────────────────────────────────────────────
-console.log('\n── 汇总 ─────────────────────────────────────────────────');
-const rows = new Map();
-for (const r of results) {
-  const section = r.name.split('-')[0];
-  if (!rows.has(section)) rows.set(section, { pass: 0, fail: 0 });
-  rows.get(section)[r.pass ? 'pass' : 'fail']++;
+  // ── Summary ──────────────────────────────────────────────────────────────
+  console.log('\n── 汇总 ─────────────────────────────────────────────────');
+  const rows = new Map();
+  for (const r of results) {
+    const section = r.name.split('-')[0];
+    if (!rows.has(section)) rows.set(section, { pass: 0, fail: 0 });
+    rows.get(section)[r.pass ? 'pass' : 'fail']++;
+  }
+  console.log('section | pass | fail');
+  for (const [s, v] of rows) console.log('  ' + s.padEnd(6) + ' | ' + String(v.pass).padEnd(4) + ' | ' + v.fail);
+  console.log('TOTAL: ' + passed + ' passed, ' + failed + ' failed, ' + results.length + ' cases');
+} finally {
+  // Clean up remotely created directories
+  for (const { conn, dir } of cleanup) {
+    try { await conn.exec('rm -rf ' + shellQuoteSingle(dir)); } catch { /* best effort */ }
+  }
+  await poolA.dispose().catch(() => {});
+  await poolB.dispose().catch(() => {});
 }
-console.log('section | pass | fail');
-for (const [s, v] of rows) console.log('  ' + s.padEnd(6) + ' | ' + String(v.pass).padEnd(4) + ' | ' + v.fail);
-console.log('TOTAL: ' + passed + ' passed, ' + failed + ' failed, ' + results.length + ' cases');
-
-// 清理远端自建目录
-for (const { conn, dir } of cleanup) {
-  try { await conn.exec('rm -rf ' + shellQuoteSingle(dir)); } catch { /* best effort */ }
-}
-await poolA.dispose().catch(() => {});
-await poolB.dispose().catch(() => {});
 console.log('RESULT-JSON ' + JSON.stringify({ env: envData, results }));
 
 if (failed > 0) {
@@ -829,7 +865,7 @@ if (failed > 0) {
 console.log('FUNCTIONAL-LIVE-TEST-OK');
 process.exit(0);
 
-// ── 工具函数 ──────────────────────────────────────────────────────────
+// ── Utility functions ──────────────────────────────────────────────────────────
 function cryptoRandom(n) {
   const buf = Buffer.allocUnsafe(n);
   let x = 0x12345678;

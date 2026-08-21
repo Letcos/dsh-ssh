@@ -1,8 +1,10 @@
 # dsh-ssh 需求与实现设计(权威笔记)
 
+> 本文属稳定规范层（Reference）；使用教程见 README.md，开发操作见 CONTRIBUTING.md，逐条决策取舍见 implemented/
+
 > **性质**: 本项目需求与实现思路的权威长期笔记(只留稳定规范); 设计与实现以此为准。各里程碑的详细验证流水已归档, 见 .agents/notes/archived/a-series-log.md。
 > **状态**: M1–M5 全部达成。实现已稳定: 方案⑤ 工具路由(agent/created 钩子遮蔽)、bash 必注册、远端后台任务、TOFU、SFTP 降级、能力面、UI/UX、测试体系(E2E)均已落地。具体设计取舍与出处见 .agents/notes/implemented/(每条 A 条目的提炼结论)。
-> **最后更新**: 2026-08-21(笔记重组: 附录 A/B 流水迁入 archived/, 设计取舍沉淀到 implemented/)
+> **最后更新**: 2026-08-20(笔记重组: 附录 A/B 流水迁入 archived/, 设计取舍沉淀到 implemented/)
 > **维护者**: 主代理 + 各子代理任务结束时回写(规则见 §10)
 > **关联文件**: AGENTS.md(总入口)、.agents/notes/README.md(组织规范)、.agents/notes/implemented/(已实现决策 note)、.agents/notes/research/(外部调研)、.agents/notes/archived/(冻结历史流水)
 
@@ -23,7 +25,7 @@
 ### 1.2 痛点分析
 
 - **现状与同类方案的问题**: DSH 所有工作区工具(bash / 文件 / 搜索)都绑定本机文件系统与进程, 跨"本地 Mac + 远程 Linux 工作站"只能手工 scp/sftp 搬运; VS Code Remote、remote agent/daemon 都要求远端装服务或内核模块(违反零安装); sshfs/FUSE 要本地内核扩展(脆弱、需管理员权限); 手动同步则丢失工作区连续性。
-- **本项目目标**: 仅凭远端 sshd 自带的 exec 通道(跑命令)+ SFTP(传文件), 让 DSH 获得与本地一致的远程工作区体验; 本地只多一个可插拔插件 + 一个 preset, 卸载后 DSH 完全恢复原样。
+- **本项目目标**: 仅凭远端 sshd 自带的 exec 通道(跑命令)+ SFTP(传文件), 让 DSH 获得与本地一致的远程工作区体验; 本地只多一个可插拔插件包(工具路由经 agent/created 钩子，无独立 preset)，卸载后 DSH 完全恢复原样。
 
 ---
 
@@ -35,7 +37,7 @@
 |---|---|---|
 | F1 | SSH 主机配置 CRUD | 设置页可添加/编辑/删除主机(host/port/user/认证方式/别名), 持久化到 DSH settings; 刷新/重启后保留 |
 | F2 | 测试连接 | 设置页一键测试: 走真实 SSH 握手 + exec 一条无害命令(如 echo), 展示远端 banner / 明确错误 |
-| F3 | 凭据安全存储 | 口令、私钥口令等敏感字段不落明文(见 §9); 私钥路径引用本地文件 |
+| F3 | 凭据安全存储 | 口令、私钥口令等敏感字段不落明文(见 §8); 私钥路径引用本地文件 |
 | F4 | 远端目录浏览 | 创建工作区时可浏览远端目录树(列表/进入/返回/家目录展开), 选择目标目录 |
 | F5 | 工作区创建/选择/切换 | 远端目录可创建为工作区; 本地与远端工作区共存; 会话级切换"运行机器"(本地 ↔ 任一远端) |
 | F6 | bash 远端执行 | 远端工作区内 bash(sh 工具)在远端 shell 执行, 以远端目录为 cwd, stdout/stderr/退出码正确返回 |
@@ -51,7 +53,7 @@
 | N2 | DSH core 零修改 | 不碰 core 包; 只通过官方公共契约纯附加(见 §3.1) |
 | N3 | 纯附加、可插拔 | 卸载插件 + 移除 preset 后 DSH 完全恢复原样 |
 | N4 | 本地工作区行为完全不变 | 本地路径的请求仍走宿主 ctx.shell / ctx.fs / ctx.subprocess, 与未装插件时一致 |
-| N5 | 升级自适应 | core 升级无需改动; 唯一维护点 = 上游 standard preset 更新后重新 copy + 三行替换(脚本化) |
+| N5 | 升级自适应 | 路由挂在 host 插件钩子 agent/created，不依赖任何 preset 副本，无上游 preset 同步维护点 |
 | N6 | 性能可接受 | 单条命令往返额外延迟在亚秒级; 大目录列举/搜索走远端单命令批量完成, 不做逐文件往返 |
 | N7 | 错误可诊断 | 失败信息含 hostId、远端命令原文、远端退出码/输出尾部, 便于定位 |
 
@@ -69,15 +71,15 @@
 
 ### 3.1 硬约束(违反任何一条的改动一律拒绝)
 
-1. **DSH core 零修改**: 不碰 /opt/homebrew/lib/node_modules/@deepseek-ai/dsh 与任何 core 包; 只通过官方公共契约(工具注册 / settings / 槽 / Typert / preset 加载器)做纯附加。
+1. **DSH core 零修改**: 不碰 DSH core 安装目录与任何 core 包; 只通过官方公共契约(工具注册 / settings / 槽 / Typert / preset 加载器)做纯附加。
 2. **远端机器零安装**: 仅 sshd 的 exec 通道 + SFTP。
-3. **纯附加、可插拔**: 全部产物 = 用户目录新增 preset + 经官方 bundle 通道安装的插件包; 卸载即恢复。
+3. **纯附加、可插拔**: 全部产物 = 通过官方 bundle 通道安装的插件包(工具路由经 agent/created 钩子，无独立 preset)；卸载后 DSH 完全恢复原样。
 4. **本地工作区行为完全不变**: 本地路径请求仍走宿主 ctx.shell / ctx.fs / ctx.subprocess。
-5. **DSH 升级自适应**: core 零改动即天然兼容; 唯一维护点是上游 standard preset 更新后重新 copy + 三行替换(用 diff 脚本化)。
+5. **DSH 升级自适应**: core 零改动即天然兼容; 路由实现挂在 host 插件钩子(agent/created)上，不依赖任何 preset 副本，无上游 preset 同步维护点。
 
 ### 3.2 已排除路线: 透明替换 host 单例服务
 
-调研结论(详见 .agents/notes/research/dsh-official-reference.md): fs / subprocess / shell / directoryPicker 都是 **host 单例服务**, 挂在主机组合上; 透明替换必须改主机组合 = 修改 core, 违反硬约束 1, 直接排除。执行链归属如下:
+调研结论(详见 .agents/notes/research/2026-08-20-dsh-official-reference.md): fs / subprocess / shell / directoryPicker 都是 **host 单例服务**, 挂在主机组合上; 透明替换必须改主机组合 = 修改 core, 违反硬约束 1, 直接排除。执行链归属如下:
 
 | 能力 | 调用链 | 服务归属 | 附加替换? |
 |---|---|---|---|
@@ -108,7 +110,7 @@
 ### 4.1 两层纯附加
 
 1. **插件 bundle dsh-ssh**: 宿主侧 ssh2 连接池(exec + SFTP、known_hosts 校验、自动重连)、SSH 主机配置(settings 命名空间)、Typert 远程目录浏览服务、客户端 UI 行(设置页 + 目录流程槽)。经官方 bundle 通道安装(dsh plugin add, 包声明 "dsh": {"bundle": {"patch": "./cordis.patch.yml"}})。
-2. **preset standard-ssh**(已移除): 早期用 agentPresets.copy('standard','standard-ssh') 复制官方 preset 并替换工具行、按会话 cwd 路由。**方案⑤ 落地后改为 preset 无关**: host 插件监听 agent/created 钩子, 仅对远端占位 cwd 会话在该 agent scope 注册 7 个同名路由工具遮蔽官方实现(见 implemented/feature/2026-08-19-preset-independent-tool-routing.md);standard-ssh preset 因冗余被整体删除(simplification/2026-08-20-remove-standard-ssh-preset.md)。
+2. **preset standard-ssh**(已移除): 早期用 agentPresets.copy('standard','standard-ssh') 复制官方 preset 并替换工具行、按会话 cwd 路由。**方案⑤ 落地后改为 preset 无关**: host 插件监听 agent/created 钩子, 仅对远端占位 cwd 会话在该 agent scope 注册 7 个同名路由工具遮蔽官方实现(见 implemented/feature/2026-08-19-preset-independent-tool-routing.md)；standard-ssh preset 因冗余被整体删除（见 implemented/simplification/2026-08-20-remove-standard-ssh-preset.md）。
 
 > patch 层顺序(官方 /develop/basic/publish): 空根 → profile bundles → profile 自身 cordis.patch.yml → $DSH_HOME/cordis.patch.yml → --patch overlay; 按 id 覆盖行时**整个 config 被替换**(须重述全部键)。dsh-ssh 的 bundle patch 只做 insert 行, 无此问题。
 
@@ -121,7 +123,7 @@
 ### 4.3 远端工作区 = 本地占位目录的普通 workspace 记录
 
 - 创建远端工作区时, 本地只生成一个**占位目录** ~/.dsh/remote/<hostId>/<path 编码>, 走 DSH 现有的 workspaceRegistry 流程登记。**占位目录必须真实存在且勿用符号链接**: workspaceRegistry.create() 会 fs.realpath 并拒绝不存在的路径(源码核对: @deepseek-ai/dsh-workspace; 官方文档 /reference/subsystems/workspace)。
-- session.header.cwd 仍指向该占位目录(普通绝对路径)→ **sessions / workspaceRegistry / apiProxy 全部零改动**; 占位↔远端映射由 dsh-ssh 维护, 占位目录内不落业务数据, 只有映射元数据(§9 开放问题 8)。
+- session.header.cwd 仍指向该占位目录(普通绝对路径)→ **sessions / workspaceRegistry / apiProxy 全部零改动**; 占位↔远端映射由 dsh-ssh 维护, 占位目录内不落业务数据, 只有映射元数据(§8.1 已决策·占位目录路径编码)。
 
 ### 4.4 UI 与通信
 
@@ -133,9 +135,9 @@
 
 ```
 ┌────────────────────────── DSH Host(本地机器) ──────────────────────────┐
-│  ┌────────────┐   preset standard-ssh(agent.cordis.yml)               │
-│  │ agent loop │──▶ bash/read/write/edit/read_image/glob/grep(同名工具) │
-│  └────────────┘       │ 按会话 cwd 路由                                │
+│  ┌────────────┐   agent/created 钩子按会话 cwd 遮蔽 7 工具              │
+│  │ agent loop │──▶ bash/read/write/edit/read_image/glob/grep(同名路由工具)│
+│  └────────────┘       │ 远端会话在 agent scope 注册同名工具遮蔽官方实现   │
 │              ┌────────┴─────────┐                                     │
 │              ▼                  ▼                                     │
 │      本地路径(委托宿主)     远端占位路径                                 │
@@ -167,43 +169,39 @@
 
 ```
 dsh-ssh/
-├── agents.md
-├── .agents/
-│   ├── README.md
-│   └── notes/{requirements-and-design.md, research/, implemented/, archived/}
-├── packages/
-│   ├── dsh-ssh/                  # 插件 bundle(核心)
-│   │   ├── package.json          # "dsh": {"bundle": {...}}
-│   │   ├── cordis.patch.yml      # bundle patch: 插入插件行
-│   │   ├── src/ssh-core/         # 连接池/exec/SFTP/known_hosts/重连
-│   │   ├── src/ssh-tools/        # 六个同名工具 + 路由
-│   │   ├── src/ssh-settings/     # 配置 schema + 持久化
-│   │   ├── src/ssh-dirbrowse/    # Typert 远程目录服务(host)
-│   │   ├── src/client/           # 客户端 UI 行
-│   │   └── lib/                  # 构建产物
-│   └── preset-standard-ssh/      # preset 产物
-│       ├── package.json
-│       ├── scripts/build-preset.mjs   # copy standard + 三行替换(可重跑)
-│       └── preset/agent.cordis.yml    # 生成物(提交入库便于 diff 审查)
-└── .gitignore
+├── AGENTS.md                        # 总入口
+├── README.md                        # 对外项目说明
+├── CONTRIBUTING.md                  # 开发者文档（脚本清单与「测试」章节）
+├── .agents/                         # 协作资料
+│   ├── README.md                    # .agents 总览
+│   └── notes/                       # Agent Notes
+│       ├── README.md                #   notes 组织规范
+│       ├── AGENTS.md                #   notes 操作规则
+│       ├── requirements-and-design.md   #   稳定规范
+│       ├── implemented/             #   已落地/已决策 note
+│       ├── research/ design/        #   外部调研 / 设计规格
+│       └── archived/                #   冻结历史流水(只读)
+└── packages/dsh-ssh/                # 全部实现(@dsh-ssh/dsh-ssh, plain JS, 无构建)
+    ├── index.js / tools.js / client.js
+    ├── tools/                       # 拆分产物(bash.js / fs.js / search.js)
+    ├── src/  lib/  scripts/  test/
+    └── README.md                    # 产品页（面向用户）
 ```
-
-依赖方向: client → ssh-dirbrowse(远程服务代理) → ssh-settings → ssh-core; ssh-tools 依赖 ssh-core + ssh-settings。preset-standard-ssh 只产出组合文件, 不依赖 bundle(运行期工具由 dsh-ssh 注册)。
 
 ### 5.2 ssh-core: 连接池 / exec / SFTP / known_hosts / 重连
 
 ```ts
-interface HostConfig {                 // 与 settings schema 对应
+interface HostConfig {                 // 与 settings schema 对应(见 src/settings.js HostConfigSchema)
   id: string;                          // 稳定 id(如 uuid), 占位目录路径依赖它
   name: string;
   host: string; port: number; user: string;
-  auth: { type: 'key'; privateKeyPath?: string; passphraseRef?: string }
-      | { type: 'password'; secretRef: string };   // 凭据存储见 §9
+  auth: { type: 'key'; privateKeyPath?: string }      // 私钥路径; 缺省走 ssh-agent
+      | { type: 'password'; password: string };      // 口令(write-only, role('secret')); 凭据存储见 §8.1 已决策·凭据存储
   knownHostsPath?: string;             // 默认 ~/.ssh/known_hosts
-  maxConnections?: number;             // 池上限, 默认 4
   connectTimeoutMs?: number;           // 默认 10_000
   keepaliveIntervalMs?: number;        // 默认 15_000
 }
+// maxConnections 为池级配置(经 bundle patch config 传入 SshPool), 非 HostConfig 字段, 默认 4
 
 class SshPool {                        // 插件内部 host 单例服务 ctx.sshPool
   acquire(hostId: string): Promise<SshConn>;                 // 复用/新建, 超额排队
@@ -221,7 +219,7 @@ class SshConn {                        // ssh2 封装, 复用 exec + SFTP
   // 内部: 半开探测 + 惰性重连(指数退避); 失败抛带 hostId 的 SshError
 }
 
-async function verifyHostKey(cfg: HostConfig, knownHostsPath: string): Promise<void>;   // 策略见 §9 开放问题 12
+async function verifyHostKey(cfg: HostConfig, knownHostsPath: string): Promise<void>;   // 策略见 §8.1 已决策·host key 校验 UX（TOFU）
 function parseSshConfig(path: string): Promise<Record<string, Partial<HostConfig>>>;    // ~/.ssh/config 子集或文档化不支持
 ```
 
@@ -230,29 +228,29 @@ function parseSshConfig(path: string): Promise<Record<string, Partial<HostConfig
 ```ts
 type Route = { kind: 'local' } | { kind: 'remote'; hostId: string; remoteCwd: string };
 function routeByCwd(cwd: string): Route;          // 占位前缀 ~/.dsh/remote/<hostId>/ 之下 → remote
-function mapLocalToRemote(p: string): { hostId: string; remotePath: string } | null;  // 占位↔远端, 编码须可逆(§9-8)
+function mapLocalToRemote(p: string): { hostId: string; remotePath: string } | null;  // 占位↔远端, 编码须可逆(§8.1 已决策·占位目录路径编码)
 function mapRemoteToLocal(hostId: string, remotePath: string): string;
 
-// 六个工具入口(签名与官方同名工具对齐, 内部按 Route 分发)
+// 七个工具入口(签名与官方同名工具对齐, 内部按 Route 分发) — bash/read/write/edit/read_image/glob/grep（见 packages/dsh-ssh/tools.js ROUTED_TOOL_NAMES）
 async function toolBash(ctx, args: { command: string; timeout?: number }, cwd: string): Promise<ToolResult>;
 async function toolRead(ctx, args: { path: string }, cwd: string): Promise<ToolResult>;
 async function toolWrite(ctx, args: { path: string; content: string }, cwd: string): Promise<ToolResult>;
 async function toolEdit(ctx, args: { path: string; edits: EditOp[] }, cwd: string): Promise<ToolResult>;
-async function toolReadImage(ctx, args: { path: string }, cwd: string): Promise<ToolResult>;  // 远端: SFTP 拉回临时文件再走宿主图像管线
+async function toolReadImage(ctx, args: { path: string }, cwd: string): Promise<ToolResult>;  // 远端: SFTP readBytes → attachments.saveImage({data}) 内存直传
 async function toolGlob(ctx, args: { pattern: string; path?: string }, cwd: string): Promise<ToolResult>;   // 远端 find 重实现
 async function toolGrep(ctx, args: { pattern: string; path?: string; glob?: string[] }, cwd: string): Promise<ToolResult>;  // 远端 grep -rn 重实现
 ```
 
-路由与委托要点: 本地分支 = 直接调用宿主 ctx.shell / ctx.fs / ctx.subprocess 的公开方法, 保证行为不变; 远端分支 = 统一"绝对路径 + cd 前缀"(§7 R1); read_image 远端分支 = SFTP 读字节 → 本地临时文件 → 复用宿主图像解码/展示管线 → 及时清理。
+路由与委托要点: 本地分支 = 直接调用宿主 ctx.shell / ctx.fs / ctx.subprocess 的公开方法, 保证行为不变; 远端分支 = 统一"绝对路径 + cd 前缀"(§7 R1); read_image 远端分支 = SFTP readBytes(有上限) → attachments.saveImage({data}) 内存直传(无临时文件) → 复用宿主图像解码/展示管线。
 
 ### 5.4 ssh-settings: 配置与凭据
 
 ```ts
 // settings 命名空间 dsh-ssh-hosts(经 ctx.settings schema 化注册, 设置页 settings.section 槽渲染; 点号被 settingsNamespace 拒绝——M2a 实测)
 // 【M2b 设计变更】hosts 为 dict(id → HostConfig) 而非数组: 官方 settings merge 对对象递归合并、对数组整体替换,
-// 数组下"口令留空=保持已存"无法表达; dict 省略 auth.password 即保留, 删除走 mutate unset ['hosts',<id>]。详见 implemented/feature/2025-08-16-settings-crud-via-typert.md。
+// 数组下"口令留空=保持已存"无法表达; dict 省略 auth.password 即保留, 删除走 mutate unset ['hosts',<id>]。详见 implemented/feature/2026-08-16-settings-crud-via-typert.md。
 const hostsSchema = { hosts: Schema.dict(HostConfigSchema).default({}) };
-// 凭据: 口令字段 role('secret')(describe 脱敏 + {path,set} 只写槽); 私钥路径明文引用本地文件; OS keychain 待评估(§9 开放问题 1)
+// 凭据: 口令字段 role('secret')(describe 脱敏 + {path,set} 只写槽); 私钥路径明文引用本地文件; OS keychain 暂不引入(§8.1 已决策·凭据存储)
 // 测试连接: F2 → 宿主 SshRemoteService.testConnection(经自建最小 Typert 通道, 客户端 ctx.remote.ssh.testConnection)
 ```
 
@@ -275,18 +273,9 @@ class RemoteDirectoryService {
 - settings.section: 主机列表(增删改) + 每行"测试连接"(F1/F2); 断线/重连状态条(F9): 工具失败时提示, 重连成功后静默恢复。
 - directoryFlow 槽(sidebar.workspaces / conversation.hero.workspace): 远端目录选择器, 选定后回调宿主工作区创建流程(F4/F5)。owner 契约: occupant 拥有从 open 到 onPicked(path)/onCancel/onError 的完整交互(含"新建目录"), busy 期间禁用提交; 组件必须处理 onCancel/onError。
 
-### 5.7 preset-standard-ssh: preset 产物(已移除)
+### 5.7 preset（已移除）
 
-> **现状**: 方案⑤(preset 无关路由)落地后本 preset 冗余, 已被整体删除; 该产物与 build-preset 脚本均不再存在, 详见 simplification/2026-08-20-remove-standard-ssh-preset.md。以下为历史设计留档, 仅作演进参考。
-
-```mjs
-// scripts/build-preset.mjs(幂等, 可重跑; 上游 standard 更新后重跑 + diff 审查)
-// 1. 读取上游 standard preset 原文(来源见 §9 开放问题 3)
-// 2. agentPresets.copy('standard', 'standard-ssh', 'standard-ssh (SSH)')   // 签名 (from, id, name?) —— name 是字符串
-//    → 生成组合文件(已验证 API: dsh-agent-presets/lib/index.js:1045)
-// 3. 替换工具行: bash/read/write/edit/read_image/glob/grep → dsh-ssh 同名工具(三行级改动, diff 输出供 review)
-// 4. 输出到 preset/agent.cordis.yml 并提交入库
-```
+已移除，详见 `implemented/simplification/2026-08-20-remove-standard-ssh-preset.md` 与 `archived/2025-08-16-preset-standard-ssh.md`（历史 preset 已整体删除，现行实现为 `agent/created` 钩子路由，无独立 preset）。
 
 ---
 
@@ -309,25 +298,25 @@ class RemoteDirectoryService {
 - **备选**: sshfs 挂载把远端目录当本地目录。
 - **理由**: macFUSE 是本地内核扩展(需安装 + 管理员权限, 升级脆弱), 违背"纯附加、可插拔"; 挂载故障难诊断且会拖垮本地文件系统路径。
 
-### D4. preset 复制(copy)而非修改 host
-- **决策**: 新建 standard-ssh preset = agentPresets.copy('standard') + 三行替换; host 组合零改动。
-- **备选**: 修改 host 组合里 fs/shell/subprocess 服务。
-- **理由**: 后者 = 改 core(违硬约束 1); copy 是官方公开 API(已验证), 产物落在用户目录, 纯附加。
+### D4. agent/created 钩子遮蔽而非修改 host（原 preset 复制已移除）
+- **决策**: host 插件监听 `agent/created`，仅对远端占位 cwd 会话在 agent scope 注册 7 个同名路由工具遮蔽官方实现；不复制 preset，不改 host 单例，详见 `implemented/simplification/2026-08-20-remove-standard-ssh-preset.md`。
+- **备选（已废弃）**: 复制 `standard` 为新 preset 再三行替换；或直接修改 host fs/shell/subprocess。
+- **理由**: 钩子方案 preset 无关、零维护点、完全可插拔；preset 复制需同步上游且已冗余（历史实现见 `archived/2025-08-16-preset-standard-ssh.md`）。
 
 ### D5. 同名工具而非新工具名
-- **决策**: 六个工具与官方同名。
+- **决策**: 七个工具与官方同名（bash/read/write/edit/read_image/glob/grep，见 packages/dsh-ssh/tools.js ROUTED_TOOL_NAMES）。
 - **备选**: 起新名字(如 ssh_bash)。
 - **理由**: 同名让 agent/用户无感切换运行机器, prompt 与习惯零改动, "本地与远端体验一致"是核心诉求; 新名需改 agent 行为与文档, 且不满足"方便切换"。
-
-### D7. 全程 plain JS(ESM), 不引入构建工具
-- **决策**: dsh-ssh 插件代码用 plain JavaScript(ESM, 函数式 + JSDoc 类型注释), 仓库不引入 tsc/tsdown/bundler; 入口即 packages/dsh-ssh/index.js(main 指向它)。
-- **备选**: TypeScript + tsdown 构建(core 仓库的做法)。
-- **理由**: 外部 bundle 只有十几~几十个文件, 构建工具链收益小、成本高(版本耦合、发布产物校验); 官方 hello-plugin 教程即 plain JS; M1 已按此落地。若日后复杂度失控(M5 评估)再引入 TS, 迁移是机械的。
 
 ### D6. 占位目录而非虚拟 URI
 - **决策**: 远端工作区 = 本地占位目录 ~/.dsh/remote/<hostId>/<path 编码> 的普通 workspace 记录; cwd 仍是普通绝对路径。
 - **备选**: 自定义 URI(如 ssh://host/path)进 workspace 子系统。
 - **理由**: 占位目录让 sessions / workspaceRegistry / apiProxy 零改动, 目录选择 UI、会话恢复、历史记录全部天然兼容; 虚拟 URI 需要动 core 的路径语义, 违反硬约束。
+
+### D7. 全程 plain JS(ESM), 不引入构建工具
+- **决策**: dsh-ssh 插件代码用 plain JavaScript(ESM, 函数式 + JSDoc 类型注释), 仓库不引入 tsc/tsdown/bundler; 入口即 packages/dsh-ssh/index.js(main 指向它)。
+- **备选**: TypeScript + tsdown 构建(core 仓库的做法)。
+- **理由**: 外部 bundle 只有十几~几十个文件, 构建工具链收益小、成本高(版本耦合、发布产物校验); 官方 hello-plugin 教程即 plain JS; M1 已按此落地。若日后复杂度失控(M5 评估)再引入 TS, 迁移是机械的。
 
 ---
 
@@ -378,7 +367,7 @@ class RemoteDirectoryService {
 ### R9. 安全
 - **风险**: host key 不校验(中间人)、私钥/口令明文落盘、命令经 shell 拼接注入。
 - **影响**: 凭据泄露、远端被控制。
-- **对策**: known_hosts 校验(TOFU 首次写入或预填指纹, 策略见 §9 开放问题 12; host key 变更必须报错); 凭据进 OS keychain 或 DSH secret 机制, 不进 settings.yaml 明文; 命令与路径统一经引号转义工具处理, 文件内容走 SFTP 参数通道不走 shell。
+- **对策**: known_hosts 校验(TOFU 首次写入或预填指纹, 策略见 §8.1 已决策·host key 校验 UX; host key 变更必须报错); 凭据进 DSH secret（`role('secret')`）机制, 不进 settings.yaml 明文; 命令与路径统一经引号转义工具处理, 文件内容走 SFTP 参数通道不走 shell。
 
 ### R10. Windows 远端 OpenSSH 差异
 - **风险**: 路径分隔符、换行(CRLF)、默认 shell(PowerShell/cmd)、权限语义与 POSIX 不同; find/grep 在 Windows 上未必可用。
@@ -387,42 +376,45 @@ class RemoteDirectoryService {
 
 ---
 
-## 9. 开放问题清单(待验证/待决策)
+## 8. 开放问题清单
 
-1. **凭据存储**(两个官方机制已核对, 二选一待 P2 决策): ① settings 的 role('secret') 字段——describe({redactSecrets:true}) 时剥除内容并按 {path,set} 槽渲染只写输入框(官方 settings 文档); ② credentials seam——CredentialRef(环境变量名), resolve/describe/set/unset, 按操作解析不缓存(官方 credentials 文档)。口令/私钥口令绝不落 settings.yaml 明文; OS keychain(keytar)是备选但引入原生依赖, 倾向避免。
-2. **agentPresets.copy 的产物落点与格式**~~【部分已解决 2025-08-16】~~: 用户 preset 根 = $DSH_HOME/.agent-presets(dsh-agent-presets@lib/index.js:160, 调研子代理核对); 复制即加载可用("Copy is the only authoring write")。剩余待 P1 实测: 复制后 agent.cordis.yml 的行格式与改 tools 行的具体方式。
-3. ~~standard preset 原文位置~~ **【已解决 2025-08-16】**: 位于本地 checkout 的 config/agent-presets/standard/agent.cordis.yml(源码仓库 config 目录; 文件头注释详细说明 realm/isolate 规则)。待替换三行: tool-bash(@deepseek-ai/dsh-tool-bash, win32 禁用)、tool-fs(@deepseek-ai/dsh-tool-fs)、tool-fs-search(@deepseek-ai/dsh-tool-fs-search)。
-4. **工具实现包归属**~~【大部分已解决 2025-08-16】~~: bash → @deepseek-ai/dsh-tool-bash; read/write/edit/read_image → @deepseek-ai/dsh-tool-fs(read_image 在 dsh-tool-fs/lib 中多处命中); glob/grep → @deepseek-ai/dsh-tool-fs-search(lib/types/glob.d.ts + grep.d.ts)。待验证: 同名替换后同 preset 内其他行(skill-filesystem/tool-jobs/plan-mode)是否受影响——预设"不受影响", P1 落地时实测。
-5. **settings.section 槽的精确用法**: 仅验证了 dsh-client-ui-settings 存在 section 概念; 槽的声明/注入/字段 schema 渲染需按官方 cookbook(/reference/cookbook/extension-cookbook)落地示例。
-6. **directoryFlow 槽返回契约**: 注入槽后, 选中目录如何回调宿主工作区创建流程(workspaceRegistry / apiProxy 的调用面)——需读 dsh-client-ui-directory-picker-browse 的宿主实现。
-7. **read_image 远端临时文件生命周期**: 拉回本地临时文件的创建/清理策略(会话结束、进程退出时的兜底清理)。
-8. **占位目录路径编码**: ~/.dsh/remote/<hostId>/<path 编码> 的编码必须可逆、跨平台安全(长度/非法字符); 映射元数据放占位目录内隐藏文件还是 DSH 元数据扩展——决定后记入 implemented/。
-9. **连接池关闭时序**: 会话/进程退出、主机配置变更、DSH 重启时的连接释放与 in-flight 请求处理。
-10. **Windows 远端支持范围**: 最终给到哪一档(路径映射 / shell / find 替代), 还是明确不支持——P3 结束前定案。
-11. **ssh-agent 转发**: 是否支持 SSH_AUTH_SOCK 转发 / 私钥 passphrase 交互(远端无头场景下的 UX)。
-12. **host key 校验 UX**: TOFU(首次信任 + 后续校验)vs 预填指纹; 变更时的处理(报错阻止 vs 提示覆盖)。
-13. **版本兼容矩阵**: 当前 core 为 rc.6; bundle 的 peerDependencies 范围如何声明, 升级后需回归哪些点。
-14. **M2 测试远端**: 本机 sshd 未开启(22 端口不通, 2025-08-16 探测)——M2 冒烟需要一个测试远端: 用户开启本机 Remote Login, 或提供一台真实远端主机(主机配置进设置页)。
+### 8.1 已决策（每项 1 行结论+出处）
 
-> 以上问题在对应里程碑实测后, 结论写入本笔记对应小节或 .agents/notes/implemented/, 并标注出处。
+- **standard preset 原文位置**：`config/agent-presets/standard/agent.cordis.yml`（含 tool-bash/tool-fs/tool-fs-search 三行），出处 `archived/2025-08-16-preset-standard-ssh.md` → preset 已整体移除，改为 `agent/created` 钩子路由（`implemented/simplification/2026-08-20-remove-standard-ssh-preset.md`）。
+- **agentPresets.copy 产物落点**：`$DSH_HOME/.agent-presets` 自动加载（`dsh-agent-presets/lib/index.js:160`）→ 已随 preset 移除而废止，同上。
+- **工具实现包归属**：`bash→dsh-tool-bash、read/write/edit/read_image→dsh-tool-fs、glob/grep→dsh-tool-fs-search`（`research/2026-08-20-dsh-official-reference.md`）。
+- **M2 测试远端**：改用真实远端主机与 `test/live-config.mjs` + `DSH_SSH_TEST_*` 覆盖（`packages/dsh-ssh/test/live-config.mjs`）。
+- **凭据存储**：`role('secret')` 口令字段（describe 脱敏 + {path,set} 只写，私钥路径明文引用本地文件，暂不引入 OS keychain），出处 `src/settings.js` HostConfigSchema / `lib/hosts-model.js` redactHosts / `implemented/feature/2026-08-16-settings-crud-via-typert.md`。
+- **settings.section 槽精确用法**：`settings.section` (kind list, scope root) id `ssh-hosts` order 40，经 `ctx.settings` + Typert 持久化（点号被 settingsNamespace 拒绝），出处 `packages/dsh-ssh/client.js` SshHostsSection / `src/remote.js` / `research/2026-08-20-dsh-official-reference.md`。
+- **directoryFlow 槽返回契约**：`sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow` (priority -1) 覆写官方，owner 拥有 open→onPicked/onCancel/onError 完整交互，出处 `client.js` DirectoryFlowCombined / `src/remote.js` listRemoteDir 等。
+- **read_image 远端分支**：远端 SFTP readBytes(有上限)→attachments.saveImage({data}) 内存直传(无临时文件)→复用宿主图像管线，出处 `packages/dsh-ssh/tools/fs.js` read_image 分支。
+- **占位目录路径编码**：`~/.dsh/remote/<hostId>/<base64url(绝对路径)>` 单段可逆、hostId 校验防穿越，已实现 `src/router.js` encodeRemotePath / `src/placeholder.js`。
+- **连接池关闭时序**：SshPool acquire/release/invalidate/dispose + SshConn._onClose 惰性重连与 in-flight 处理，出处 `src/ssh-core.js`。
+- **Windows 远端支持范围**：优先 Linux/macOS；Windows 远端仅 bash 跟随远端平台、pwsh 不路由，文档化限制，出处 `implemented/feature/2026-08-19-preset-independent-tool-routing.md` + §7 R10。
+- **ssh-agent 转发**：支持 `SSH_AUTH_SOCK` 转发（`process.env.SSH_AUTH_SOCK → opts.agent`），私钥口令交互不另行透传，出处 `src/ssh-core.js`。
+- **host key 校验 UX**：TOFU 弹窗（HOST_KEY_UNKNOWN_STAGE → 指纹/类型展示→信任后写 known_hosts→自动重试），mismatch 硬拒绝，出处 `implemented/feature/2026-08-19-tofu-host-key.md` / `src/ssh-core.js`。
+
+### 8.2 待决策
+
+- **版本兼容矩阵**：`rc.7` 的 `peerDependencies` 声明与升级回归点。
 
 ---
 
-## 10. 版本与更新规则
+## 9. 版本与更新规则
 
-### 10.1 何时更新
+### 9.1 何时更新
 
 - **任何设计变更**: 先改本笔记(或记 .agents/notes/implemented/), 再动代码(AGENTS.md §5 约定);
 - **每个里程碑完成后**: 回写实测验证过的命令、API、踩坑(含出处: 文档 URL 或本地源码路径);
-- **"已验证"事实变化 / 开放问题定案时**: 分别更新对应小节, 开放问题从 §9 移出。
+- **"已验证"事实变化 / 开放问题定案时**: 分别更新对应小节, 开放问题从 §8 移出。
 
-### 10.2 由谁更新
+### 9.2 由谁更新
 
 - **主代理**: 负责本笔记的结构与重大设计修订;
 - **子代理**: 任务结束时把关键结论/已验证事实/踩坑追加或修正到对应小节(以追加为主; 并发回写冲突时保留双方条目并标注, 不覆盖他人结论);
 - 每次更新刷新文件头的"最后更新"日期与本次改动摘要。
 
-### 10.3 记录规范
+### 9.3 记录规范
 
 - "已验证"必须注明出处(文档 URL 或本地源码路径, 如 dsh-agent-presets/lib/index.js:1045);
 - 未验证的猜测标注"(待验证)";

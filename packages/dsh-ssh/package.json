@@ -1,8 +1,11 @@
 {
   "name": "@dsh-ssh/dsh-ssh",
   "version": "0.1.2",
-  "description": "SSH remote workspace for DeepSeek Harness: host plugin bundle (M2a ssh-core+settings, M2b settings-page UI + testConnection remote)",
+  "description": "SSH remote workspace for DeepSeek Harness: ssh2 connection pool, host settings, and routed bash/fs/search tools",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "index.js",
   "exports": {
     ".": "./index.js",
@@ -20,7 +23,7 @@
     "cordis.patch.yml",
     "src",
     "lib",
-    "scripts"
+    "tools"
   ],
   "repository": {
     "type": "git",

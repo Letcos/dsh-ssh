@@ -1,5 +1,5 @@
-// @dsh-ssh/dsh-ssh — P0 sandbox policy 纯函数单测 (node --test, 无 IO/网络)。
-// 覆盖三种模式 × 区内/区外/逃逸路径的判定矩阵 + denial 错误形状 + resolveRemotePath 绝对路径规范化。
+// @dsh-ssh/dsh-ssh — unit tests for sandbox policy pure functions (node --test, no IO/network).
+// Covers the decision matrix for three modes × inside/outside/escape paths, denial error shape, and absolute path normalization.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isPathInsideWorkspace, mutationDenialMode, sandboxDenialError } from '../src/policy.js';
@@ -36,18 +36,18 @@ test('isPathInsideWorkspace: non-string input → false (fail-closed)', () => {
   assert.equal(isPathInsideWorkspace('/data/work/a', undefined), false);
 });
 
-// ── mutationDenialMode 矩阵 (三种模式 × 区内/区外/逃逸) ──
+// ── mutationDenialMode matrix (three modes × inside/outside/escape) ──
 const INSIDE = '/data/work/new.txt';
 const OUTSIDE = '/etc/passwd';
-const ESCAPE = '/data/work/../../etc/passwd'; // 词法归一化后 = /etc/passwd (区外)
+const ESCAPE = '/data/work/../../etc/passwd'; // lexically normalizes to /etc/passwd (outside)
 
-test('mutationDenialMode: danger-full-access → 全放行', () => {
+test('mutationDenialMode: danger-full-access → allow all', () => {
   assert.equal(mutationDenialMode('danger-full-access', INSIDE, '/data/work'), null);
   assert.equal(mutationDenialMode('danger-full-access', OUTSIDE, '/data/work'), null);
   assert.equal(mutationDenialMode('danger-full-access', ESCAPE, '/data/work'), null);
 });
 
-test('mutationDenialMode: workspace-write → 区内放行 / 区外与逃逸拒绝', () => {
+test('mutationDenialMode: workspace-write → allow inside / deny outside and escape', () => {
   assert.equal(mutationDenialMode('workspace-write', INSIDE, '/data/work'), null);
   assert.equal(mutationDenialMode('workspace-write', '/data/work', '/data/work'), null, 'exact root');
   assert.equal(mutationDenialMode('workspace-write', OUTSIDE, '/data/work'), 'workspace-write');
@@ -55,17 +55,17 @@ test('mutationDenialMode: workspace-write → 区内放行 / 区外与逃逸拒�
   assert.equal(mutationDenialMode('workspace-write', ESCAPE, '/data/work'), 'workspace-write');
 });
 
-test('mutationDenialMode: read-only → 一律拒绝', () => {
+test('mutationDenialMode: read-only → deny all', () => {
   assert.equal(mutationDenialMode('read-only', INSIDE, '/data/work'), 'read-only');
   assert.equal(mutationDenialMode('read-only', OUTSIDE, '/data/work'), 'read-only');
   assert.equal(mutationDenialMode('read-only', ESCAPE, '/data/work'), 'read-only');
 });
 
-test('mutationDenialMode: 未知模式 fail-closed 拒绝', () => {
+test('mutationDenialMode: unknown mode → fail-closed deny', () => {
   assert.equal(mutationDenialMode('weird-mode', INSIDE, '/data/work'), 'weird-mode');
 });
 
-// ── sandboxDenialError: 与官方同形 ──
+// ── sandboxDenialError: matches official shape ──
 test('sandboxDenialError: FsError + FS_SANDBOX_DENIED + marker + escalation hint', () => {
   const err = sandboxDenialError('workspace-write', 'operation');
   assert.ok(err instanceof FsError);
@@ -80,7 +80,7 @@ test('sandboxDenialError: read-only mode marker', () => {
   assert.ok(err.message.startsWith('[sandbox: file access denied under read-only mode]'), err.message);
 });
 
-// ── resolveRemotePath: 绝对路径规范化关闭 ../ 词法逃逸 ──
+// ── resolveRemotePath: absolute path normalization closes lexical ../ escape ──
 test('resolveRemotePath normalizes absolute .. traversal (lexical)', () => {
   assert.equal(resolveRemotePath('/data/work/../../etc/passwd', '/data/work', undefined), '/etc/passwd');
   assert.equal(resolveRemotePath('/data/work/sub/../inside.txt', '/data/work', undefined), '/data/work/inside.txt');

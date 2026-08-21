@@ -20,5 +20,5 @@ Status: implemented
 - 真机 forceExecFs 全链路 18/18 PASS(与 SFTP 交叉互读一致;600KB 大文件分块写读往返;后台任务日志经 execfs 增拉取+清理)。
 
 ## 出处
-- archived/a-series-log.md A.36(SFTP 降级);decisions/D-36-execfs-fallback.md。
-- ssh-core.js(SshConn.fs + 能力探测)、src/exec-fs.js;官方 filesystem 文档(rem sha device)。
+- `archived/a-series-log.md` A.36（SFTP 降级，原 D-36 决策已归档至该条目）。
+- `ssh-core.js`（`SshConn.fs` + 能力探测）、`src/exec-fs.js`；官方 filesystem 文档（`rem` `sha` `device`）。

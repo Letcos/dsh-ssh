@@ -1,11 +1,11 @@
-# DSH 官方扩展点与开发规范速查(dssh 调研笔记)
+# DSH 官方扩展点与开发规范速查(dsh-ssh 调研笔记)
 
-> 调研对象: 官方文档站点(VitePress, 根 locale 简体中文, 2026-08 抓取) + 本地 DSH 安装(只读) /opt/homebrew/lib/node_modules/@deepseek-ai/dsh (版本 0.1.0-rc.6) + GitHub 仓库 deepseek-ai/deepseek-harness(master 分支)。
+> 调研对象: 官方文档站点(VitePress, 根 locale 简体中文, 2026-08 抓取) + 本地 DSH 安装(只读) <dsh-checkout> (版本 0.1.0-rc.6; 调研后上游已发布 rc.7) + GitHub 仓库 deepseek-ai/deepseek-harness(master 分支)。
 > 约定: 「源码核对过」= 在本地 checkout 包内 grep/read 到确切声明, 出处写 包名@lib/... ; 「仅文档」= 只出现在官方站点/仓库文档, 未在本地包内核对。
 
 ## 一、文档页索引(前缀 https://deepseek-harness.github.io/deepseek-harness)
 
-| 页面路径 | 标题 | 与 dssh 相关要点 |
+| 页面路径 | 标题 | 与 dsh-ssh 相关要点 |
 |---|---|---|
 | /develop/basic/ | 第一个插件 | 插件=导出 name+apply(ctx) 的模块; 注册是效果自动清理; inject 声明依赖; 三种形态(函数/对象/类) |
 | /develop/basic/tool | 开发一个工具 | defineTool({name,description,parameters,output:{schema,render},execute}); ctx.tools.register |
@@ -18,7 +18,7 @@
 | /reference/agent-lifecycle | Agent 轮次与步骤生命周期 | session/event(可回放) vs agent/*(实时); agent/pre-step 与 agent/request-error |
 | /reference/tool-execution-pipeline | 工具执行流水线 | pre-execute→单调 guard→execute→post-execute→finalizeContent→result; fs/* 先读后编辑 |
 | /reference/cordis-primer | Cordis 入门 | 5 核心概念; 分发模式表; waterfall 语义; Loader 的 !!js(cordis-plugin-include) |
-| /reference/cookbook/adding-a-package | 实操:添加 workspace 包 | 仓库内建包清单(对 dssh 仅参考); 命名规范表 Provider/Executor/Backend/Handle... |
+| /reference/cookbook/adding-a-package | 实操:添加 workspace 包 | 仓库内建包清单(对 dsh-ssh 仅参考); 命名规范表 Provider/Executor/Backend/Handle... |
 | /reference/cookbook/adding-a-tool | 工具编写参考 | execute 规则; output 规范值; presentCall/Result 卡片(generic/terminal/diff/read/search/web); ctx.jobs.start 后台; Code Mode 自动可达 |
 | /reference/cookbook/extension-cookbook | 实操:扩展插件形态 | 权限门禁(tools/pre-execute); UI 插件(session/event+followup); 产品功能→机制映射表 |
 | /reference/subsystems/settings | 用户设置 | settingsNamespace 注册; 分层解析(default→base→user); describe/update/replace/mutate; settings/updated |
@@ -34,9 +34,9 @@
 | /reference/subsystems/workflow | 工作流 | workflowEngine seam + worker-thread 引擎 + tool-workflow; WorkflowStartRequest/meta/result |
 | /reference/subsystems/skills | Skills | ctx.skills 注册表; SkillProvider list/get; 本地发现优先级(project-dsh 最高) |
 
-## 二、扩展点速查(能力 / 官方机制与出处 / dssh 如何用 / 验证状态)
+## 二、扩展点速查(能力 / 官方机制与出处 / dsh-ssh 如何用 / 验证状态)
 
-| 能力 | 官方机制与出处 | dssh 如何用 | 验证 |
+| 能力 | 官方机制与出处 | dsh-ssh 如何用 | 验证 |
 |---|---|---|---|
 | 工具注册 | ctx.tools.register(defineTool({...})); @deepseek-ai/dsh-tools@lib/types/schema.d.ts:defineTool、lib/types/index.d.ts:ToolRuntime.register; 用法示例 dsh-tool-bash@lib/index.js:259 | 新包内注册同名工具 bash/read/write/edit/read_image/glob/grep, 按会话 cwd 路由 | 源码核对过 |
 | 工具流水线钩子 | tools/pre-execute|execute|post-execute|result(waterfall); guard()/restrict(); @deepseek-ai/dsh-tools@lib/types/index.d.ts | 可选: 用 pre-execute 对远端路径做 allow/deny 策略 | 源码核对过 |
@@ -60,7 +60,7 @@
 
 1. **bundle 三件套**(官方 /develop/basic/publish 契约; 形态见本仓库 packages/dsh-ssh): package.json(声明 dsh:{bundle:{patch:./cordis.patch.yml}}; 有客户端则加 dsh:{client:{platform:web,inject:[...]}} 与 exports[./client]) + cordis.patch.yml(patch 条目数组, 行按包名引用) + lib/(宿主半 index.js + 客户端半 client.js)。
 2. **安装**: dsh plugin --profile <name> add <本地路径|npm 包|github:user/repo#sha> —— 在 profile 目录内转发给 pnpm; 首次自动初始化 profile(@deepseek-ai/dsh-base 为第一层), 有 dsh.bundle 声明的包追加进 dsh.profile.bundles。移除: dsh plugin --profile <name> remove <pkg>。
-3. **层顺序**(后层胜出, 按 id 覆盖行时**整个 config 被替换**, 须重述全部键): 空根 → profile bundles(按列表顺序) → profile 自身 cordis.patch.yml → $DSH_HOME/cordis.patch.yml → 各 --patch overlay。→ dssh 若用 patch 改行必须整行重写; preset 方案是整文件所有权, 无此问题。
+3. **层顺序**(后层胜出, 按 id 覆盖行时**整个 config 被替换**, 须重述全部键): 空根 → profile bundles(按列表顺序) → profile 自身 cordis.patch.yml → $DSH_HOME/cordis.patch.yml → 各 --patch overlay。→ dsh-ssh 若用 patch 改行必须整行重写; preset 方案是整文件所有权, 无此问题。
 4. **git 安装要授权**: pnpm≥10 拒绝运行 git 依赖的 prepare 脚本; 需在 profile 的 pnpm-workspace.yaml 加 allowBuilds 条目(作者提供自包含 prepare 脚本)。免授权路线: 发布 npm 或交付 tarball(pnpm pack)。
 5. **preset 发布**: 用户 preset 根为 $DSH_HOME/.agent-presets/; 用官方 authoring API ctx.agentPresets.copy('standard','standard-ssh',显示名) 复制, 然后编辑 agent.cordis.yml 替换 tool-bash/tool-fs/tool-fs-search 三行为我们包里的实现; preset.yml 提供显示名/描述/顺序。复制即加载可用(「Copy is the only authoring write」)。
 6. **peer 依赖**: 参考包声明 @deepseek-ai/cordis 及所需 dsh 包为 peerDependencies, 经 $DSH_HOME/profiles/node_modules 回退解析; schemastery 放 dependencies。
@@ -70,12 +70,12 @@
 
 **已发现**(GitHub deepseek-ai/deepseek-harness, 默认分支 master; 本地 checkout 是发布产物, 不含这些文件):
 
-- **根 AGENTS.md**(完整内容已存 /tmp/dsh-docs/AGENTS.md): 核心信条「everything is a plugin」; 仓库布局 vendor/ + packages/(core/api/typert/llm/shell/subprocess/fs/bundle/preset/...); 关键约定: 注册是效果(ctx.effect/ctx.on, 返回 disposer); **插件而非改循环**(新行为走文档化扩展点, 改 agent-loop 需更新 docs/architecture.md); 能力接缝 = Service Definition/Provider/Consumer 三件套; 包命名/角色命名规范表; 非平凡变更必须附 Agent Note; Agent Notes 归档即冻结; Model Experience 文档规范; 测试/快照/覆盖率门槛; pre-release 阶段不保兼容(升级自适应对 dssh 反而友好)。
+- **根 AGENTS.md**(完整内容已存 /tmp/dsh-docs/AGENTS.md): 核心信条「everything is a plugin」; 仓库布局 vendor/ + packages/(core/api/typert/llm/shell/subprocess/fs/bundle/preset/...); 关键约定: 注册是效果(ctx.effect/ctx.on, 返回 disposer); **插件而非改循环**(新行为走文档化扩展点, 改 agent-loop 需更新 docs/architecture.md); 能力接缝 = Service Definition/Provider/Consumer 三件套; 包命名/角色命名规范表; 非平凡变更必须附 Agent Note; Agent Notes 归档即冻结; Model Experience 文档规范; 测试/快照/覆盖率门槛; pre-release 阶段不保兼容(升级自适应对 dsh-ssh 反而友好)。
 - **.agents/**(仓库内): notes/(Agent Notes 目录) + skills/(dsh-pre-push-checks、dsh-doc-standards、dsh-prose-standard 等)。
 - **docs/**: AGENTS.md(文档规范)、architecture.md、capability-seams、cordis-primer、cookbook/(adding-a-package、adding-a-tool 等)、defensive-patterns、glossary、testing 等; website/ 是 VitePress 投影。
-- 对 dssh 的意义: 这些是给 DSH 仓库贡献者的规范, dssh 作为外部插件**不强制**; 可借鉴其命名规范与接缝理念, 并注意 Agent Note「归档即冻结」文化与我们 notes/research/ 的定位不同。
+- 对 dsh-ssh 的意义: 这些是给 DSH 仓库贡献者的规范, dsh-ssh 作为外部插件**不强制**; 可借鉴其命名规范与接缝理念, 并注意 Agent Note「归档即冻结」文化与我们 notes/research/ 的定位不同。
 
-## 五、对 dssh 的注意事项与开放问题
+## 五、对 dsh-ssh 的注意事项与开放问题
 
 1. **占位目录必须真实存在**: workspaceRegistry.create() 会 fs.realpath 并拒绝不存在路径; 占位路径避免用符号链接(realpath 会把它规范成目标), 直接用 ~/.dsh/remote/<hostId>/<path> 普通目录。
 2. **会话 cwd**: 由 API 网关从所选工作区 path 解析并写入不可变 SessionHeader; 远端工作区 = 占位目录绝对路径, sessionPersistence/workspaceRegistry 零改动(与可行性结论一致, 已复核)。

@@ -106,7 +106,7 @@ export function createRemoteBashJobHooks({ conn, cmd, cwd, hostId, jobDir, pollM
 
   const spawned = (async () => {
     // Ensure the remote jobDir exists first (mkdir -p, idempotent). Real service
-    // startRemoteBackground uses defaultRemoteJobId(hostId) as jobDir but never mkdirs
+    // startRemoteBackground uses defaultRemoteJobDir(hostId) as jobDir but never mkdirs
     // it — if the directory is missing, the spawn's >log redirect fails to open, the
     // background process dies immediately, no log/status/side-effect files land on
     // disk, and the done poll sees !alive && ec===null, misreporting 'completed exit
@@ -132,7 +132,7 @@ export function createRemoteBashJobHooks({ conn, cmd, cwd, hostId, jobDir, pollM
   async function isAlive() {
     if (state.pid === null) {
       await spawned;
-      if (state.pid === null) return true; // 启动失败由 done 兜底
+      if (state.pid === null) return true; // startup failure is surfaced via done
     }
     const r = await conn.exec(buildAliveProbeCommand(state.pid), { timeoutMs: 10_000 });
     return /ALIVE/.test(r.stdout);

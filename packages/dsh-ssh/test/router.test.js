@@ -1,4 +1,4 @@
-// @dsh-ssh/dsh-ssh — M3b router unit tests (node --test, no network/IO).
+// @dsh-ssh/dsh-ssh — router unit tests (node --test, no network/IO).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -16,8 +16,8 @@ import {
 
 const ENV = { DSH_SSH_REMOTE_ROOT: '/tmp/dsh-ssh-test-remote-root' };
 
-// Windows 下 path.resolve/join 对 POSIX 形态输入(测试自造 env 值)会产出带盘符 + 反斜杠的本地路径;
-// 这些用例只关心"哪级根生效 + 拼接落点", 与盘符(cwd 决定)无关, 故统一归一化到 POSIX 形态再比较。
+// On Windows path.resolve/join produce drive-letter/backslash paths for POSIX-style synthetic env values;
+// these tests only care about which root is effective and the join result, so normalize to POSIX before comparing.
 const toPosix = (p) => String(p).replace(/^[A-Za-z]:/, '').replace(/\\/g, '/');
 
 test('remoteRoot: DSH_SSH_REMOTE_ROOT > DSH_HOME > ~/.dsh/remote', () => {
@@ -28,7 +28,7 @@ test('remoteRoot: DSH_SSH_REMOTE_ROOT > DSH_HOME > ~/.dsh/remote', () => {
 });
 
 test('encode/decode round-trip: ascii, unicode, special chars, empty', () => {
-  // 注意: 空串不是合法远端路径(远端路径必为绝对路径), 单独断言其被拒绝
+  // Note: empty string is not a valid remote path (remote paths are absolute); assert rejection separately
   assert.equal(encodeRemotePath(''), '');
   assert.equal(decodeRemotePath(''), null);
   const samples = ['/data/work', '/data/my dir/with spaces', '/中文/路径/😀', "/has/single'quote", '/a	b'];
@@ -65,7 +65,7 @@ test('mapLocalToRemote rejects wrong shape / non-absolute / traversal', () => {
   assert.equal(mapLocalToRemote('/tmp/dsh-ssh-test-remote-root', ENV), null);
   assert.equal(mapLocalToRemote('/tmp/dsh-ssh-test-remote-root/h1', ENV), null);
   assert.equal(mapLocalToRemote('/tmp/dsh-ssh-test-remote-root/h1/xx/deep', ENV), null);
-  assert.equal(mapLocalToRemote('/Users/elsewhere/foo', ENV), null);
+  assert.equal(mapLocalToRemote('/tmp/elsewhere/foo', ENV), null);
   assert.equal(mapLocalToRemote('/tmp/dsh-ssh-test-remote-root/h1/!!!', ENV), null);
   assert.equal(mapLocalToRemote('/tmp/dsh-ssh-test-remote-root/../h1/' + encodeRemotePath('/x'), ENV), null);
   assert.equal(mapLocalToRemote('/tmp/dsh-ssh-test-remote-root/..%2Fh1/' + encodeRemotePath('/x'), ENV), null);
@@ -78,7 +78,7 @@ test('routeByCwd: remote only for exact <root>/<hostId>/<encoded>', () => {
   assert.deepEqual(routeByCwd(local, ENV), { kind: 'remote', hostId: 'h1', remoteCwd: '/data/work' });
   assert.deepEqual(routeByCwd('/tmp/dsh-ssh-test-remote-root/h1', ENV), { kind: 'local' });
   assert.deepEqual(routeByCwd(local + '/sub/file', ENV), { kind: 'local' });
-  assert.deepEqual(routeByCwd('/Users/haowu/project', ENV), { kind: 'local' });
+  assert.deepEqual(routeByCwd('/home/devuser/project', ENV), { kind: 'local' });
   assert.deepEqual(routeByCwd('', ENV), { kind: 'local' });
   assert.deepEqual(routeByCwd(undefined, ENV), { kind: 'local' });
 });

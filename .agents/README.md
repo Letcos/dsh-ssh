@@ -7,9 +7,11 @@
 - `notes/README.md` — Agent Notes 组织规范(一条 note = 一个主题;类别/命名/格式/归档)
 - `notes/AGENTS.md` — notes 层操作规则(写什么/放哪/怎么写)
 - `notes/requirements-and-design.md` — 需求+设计权威笔记(只留稳定规范:背景/硬约束/总体架构/模块/风险)
-- `notes/implemented/` — 已落地/已决策的 note(工具路由/后台任务/settings/Tofu/SFTP 降级/能力面/UI/UX/测试体系等)
+- `notes/implemented/` — 已落地/已决策的 note(工具路由/后台任务/settings/TOFU/SFTP 降级/能力面/UI/UX/测试体系等)
+- `notes/proposed/` — 提案中(待决策提案,空时以 README 占位)
+- `notes/rejected/` — 被否定的方案(保留否决理由)
 - `notes/research/` — 外部调研笔记(DSH 官方文档、协议、竞品等)
-- `notes/design/` — 设计规格(如 ui-ux-spec.md)
+- `notes/design/` — 设计规格(如 2026-08-20-ui-ux-spec.md)
 - `notes/archived/` — 冻结的历史流水与旧 note(如 a-series-log.md,只读)
 
 > 注:历史 `decisions/` 目录内容已并入 `implemented/` 对应类别,不再单独存在。

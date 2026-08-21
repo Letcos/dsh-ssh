@@ -7,7 +7,7 @@ Status: implemented
 ## Decision
 - **占位工作区显示名分层演进**:最终格式 = `主机显示名 / basename`(如 `ubuntu / opencode-api`);此前为 `basename · 主机显示名`、再之前为纯 basename。`workspaceRegistry.create(localPath, title)` 显式传 title(不让 framework 取占位目录 basename);旧记录自动迁移:仅当 title 恰为「base64 编码段」或「纯 basename(旧签名)」时 setTitle 升级,已含分隔符的用户定制标题不动、幂等。
 - **bash 卡片 cwd 显示 base64**:官方 BashRow 把 session cwd 尾段直接显示。宿主侧无法修(presentCall 只收 args,无会话/路由上下文;占位目录名不能被路由可逆地改)→ 客户端自定义 toolview:注册 `tool.call.toolview` keyed 槽 key=bash 且 priority:-1 覆写官方 BashRow,渲染前把 card.cwd 经 sshDecodeRemoteCwd 解码(镜像 router 的可逆守卫);本地不命中原样返回,显示逐字节不变。
-- **UI/UX 规范四批(design/ui-ux-spec.md §6 A/B/C/D)+ 默认工作区方案 C**:
+- **UI/UX 规范四批(design/2026-08-20-ui-ux-spec.md §6 A/B/C/D)+ 默认工作区方案 C**:
   - A:智能默认 tab(未定态按主机记忆选 remote/local;tab/主机记忆降级为浏览器 localStorage——api.settings 写不了插件命名空间且红线禁改 src;本地页签不自动弹系统对话框,显式「选择本机文件夹…」触发)。
   - B:文案重写(zh/en 对称各 48 键),黑话清零(sshd/exec/SFTP/占位/命名空间…不再进用户文案)。
   - C:状态组件收敛为官方 `StatusNote`(StateDot)+ 删除确认改官方 Modal + 表单内测试连接 + 空态 CTA/错误重试;原生下拉框改官方 Menu 组件(SelectMenu),「添加」按钮防换行。
@@ -15,7 +15,7 @@ Status: implemented
 - **D: 远程页签多主机切换**:配置主机数 >1 时,远端浏览阶段的 pathbar 用官方 `SelectMenu` 呈现主机切换器(取代之前的只读 Pill),选中即 `selectHost(id)` → `resolveRemoteHome` 重新列该机家目录;单主机时保持 Pill 作为「当前主机」标识(`.dsh-remote-hostswitch` 容器限宽 180–220px 防挤压路径)。
 - **E: 移除「上次使用:远程」提示**:删除弹窗顶部 `tab.defaultHint` 提示元素及为之存在的 `fromMemory` 状态/逻辑,并移除 ZH/EN 对应 locale key——本地与远端页签都不再显示该提示。
 - **F: 设置详情页标题纯文字化**:标题由「地球 icon+远程主机」改为纯文字 `h2`「SSH 连接」,CSS 对齐官方设置详情标题(`dsh-client-ui-settings-models` ModelsSection 的 h2.title:16px/500/24px,不另创字号);移除详情标题上的地球 icon(`IconGlobeOutline14` 随之删除)。
-- **G: 主机列表地址展示脱敏**:新增 `maskHostAddress`(仅展示层)——保留地址首尾点分段、中间每段替换为 `***`(如 `49.***.***.93`;hostname 同理,≤2 段时原样返回),应用到 HostRow 的地址行;存储与建连仍用完整 `host.host`。
+- **G: 主机列表地址展示脱敏**:新增 `maskHostAddress`(仅展示层)——保留地址首尾点分段、中间每段替换为 `***`(如 `203.***.***.10`;hostname 同理,≤2 段时原样返回),应用到 HostRow 的地址行;存储与建连仍用完整 `host.host`。
 - **H: 设置详情页排版对齐官方「Agent 预设」页(rtSEdW 值)**:对照官方 `dsh-client-ui-agent-preset` 的 `AgentPresetSection.module.css`(打包进 lib/client.js 的 CSS hash `rtSEdW`)做纯排版对齐——标题已是 18/600 不变;容器 `.dsh-hosts` gap 14→12px、加 `max-width:720px`(官方 _section 的 gap:12px/内宽 720);intro 由 12/18 改为官方 13px、`margin:0`、tertiary 色;新增 `_group`+ 列表分节小标题 `_groupHead`(`letter-spacing:.06em`、uppercase、12px/600、tertiary)包住主机列表,文案走新 locale key `listLabel`(zh「主机列表」/ en「Host list」)。**明确不改**:主机列表 `.dsh-row*`(HostRow)行样式维持原样,未改成官方 card 样式。全部新样式沿用既有 `--dsw-alias-label-*` 主题 token。
 
 ## Alternatives considered
@@ -28,5 +28,7 @@ Status: implemented
 
 ## 出处
 - archived/a-series-log.md A.15(显示名 basename)、A.23(原生下拉→Menu)、A.24(UI/UX 四批 + 方案 C)、A.29(主机标识 + base64 排查)、A.32(标题格式 主机名/目录)、附录 B(bash toolview)。
-- design/ui-ux-spec.md §6;dsh-client-ui-tool/lib/client.js BashRow / tool.call.toolview 槽;dsh-client-ui-slots keyed slot;本仓库 src/placeholder.js、src/remote.js createPlaceholder、client.js。
-- 排版对齐出处(已验证):官方 CSS 值取自 `C:\Users\Administrator\.dsh\profiles\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\dsh-client-ui-agent-preset\lib\client.js:976-977`(AgentPresetSection.module.css 内联,hash `rtSEdW`);主题 token `--dsw-alias-label-{primary,secondary,tertiary}` 定义于 `dsh-client-ui-theme\lib\styles\design-platform.css:207-209 / 299-301`(深/浅色)。
+- design/2026-08-20-ui-ux-spec.md §6;dsh-client-ui-tool/lib/client.js BashRow / tool.call.toolview 槽;dsh-client-ui-slots keyed slot;本仓库 src/placeholder.js、src/remote.js createPlaceholder、client.js。
+- 排版对齐出处(已验证):官方 CSS 值取自 `<DSH_HOME>/profiles/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js:976-977`（`AgentPresetSection.module.css` 内联，hash `rtSEdW`）；主题 token `--dsw-alias-label-{primary,secondary,tertiary}` 定义于 `dsh-client-ui-theme/lib/styles/design-platform.css:207-209 / 299-301`（深/浅色）。[^1]
+
+[^1]: 路径已泛化：原文为本机绝对路径，现以 `<DSH_HOME>` 占位符表示，符合敏感信息零入库红线。

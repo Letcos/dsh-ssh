@@ -1,4 +1,4 @@
-// @dsh-ssh/dsh-ssh — Typert contribution shape tests (M2b).
+// @dsh-ssh/dsh-ssh — Typert contribution shape tests.
 // Verify the host contribution and client descriptors are structurally
 // registrable: mirror the typert-registry validateInvocation rules and the
 // client-side strict-codec requirement (dsh-api-gateway/lib/client.js).
@@ -60,12 +60,12 @@ test('CRUD wire args: listHosts has none; saveHost/deleteHost carry id (+patch) 
   assertWires(LIST_HOSTS_ENDPOINT, []);
   assertWires(SAVE_HOST_ENDPOINT, ['id', 'patch', 'revision']);
   assertWires(DELETE_HOST_ENDPOINT, ['id', 'revision']);
-  // M4: browse endpoints are positional (hostId first, path/remotePath second)
+  // Browse endpoints are positional (hostId first, path/remotePath second)
   assertWires(LIST_REMOTE_DIR_ENDPOINT, ['hostId', 'path']);
   assertWires(STAT_REMOTE_ENDPOINT, ['hostId', 'path']);
   assertWires(RESOLVE_REMOTE_HOME_ENDPOINT, ['hostId']);
   assertWires(CREATE_PLACEHOLDER_ENDPOINT, ['hostId', 'remotePath']);
-  // A.34: trustHostKey positions hostId, rawKeyBase64, fingerprint (raw key the user confirmed).
+  // trustHostKey positions hostId, rawKeyBase64, fingerprint (raw key the user confirmed).
   assertWires(TRUST_HOST_KEY_ENDPOINT, ['hostId', 'rawKeyBase64', 'fingerprint']);
 });
 

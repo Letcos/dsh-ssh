@@ -1,5 +1,6 @@
 > **历史流水归档, 不再更新; 权威以 .agents/notes/implemented/ 为准。**
-> **安全说明: 真实测试主机地址已脱敏为保留示例地址 203.0.113.10(RFC 5737 TEST-NET-3, 永不真实路由); 私钥绝对路径已泛化为 <home>/.ssh/id_ed25519。**
+> **安全说明: 真实测试主机地址与主机名已脱敏为保留示例地址 203.0.113.10(RFC 5737 TEST-NET-3, 永不真实路由)与 <remote-host> 占位; 本机 node/dsh 安装绝对路径与私钥路径已泛化为 <dsh-checkout>/<home>/.ssh/id_ed25519 等占位符。**
+> 脱敏修订(2026-08-20 首轮 + 2026-08-21 二轮补漏)：本文件历史流水曾残留本机绝对路径与真实主机名，已按安全红线批量泛化（archived 只读规则的安全例外，判例见 notes/AGENTS.md §5），仅泛化路径/主机名、不改写史实。
 > 本文件为 requirements-and-design.md 附录 A/B 的原始流水账整体迁移(2025-08-16 ~ 2026-08-21); 每条 A 条目在 implemented/ 下有提炼结论。
 
 ---
@@ -33,7 +34,7 @@
 
 | 事实 | 出处/实测 |
 |---|---|
-| dsh CLI 实际位置与版本: /opt/homebrew/bin/dsh(symlink → ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js), dsh --version = 0.1.0-rc.6 | 实测 which dsh + dsh --version(2025-08-16) |
+| dsh CLI 实际位置与版本: <dsh-checkout>/bin/dsh(symlink → ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js), dsh --version = 0.1.0-rc.6 | 实测 which dsh + dsh --version(2025-08-16) |
 | dsh plugin 是必带 --profile <name> 的子命令; dsh plugin --help 缺 profile 时报 error: required option '--profile <name>' not specified; 完整语法 dsh plugin --profile <name> <pnpm 参数...>, 子命令参数原样转发给 profile 目录内的 pnpm | 实测 + dsh@lib/bin.js:96(parseDshArgs 的 plugin 分支) |
 | 首次 dsh plugin --profile <name> add ... 会自动 initProfile: 写 package.json(name=dsh-profile-<name>, private, dependencies:{} + dsh.profile.bundles=[@deepseek-ai/dsh-base])、cordis.patch.yml(空模板)、pnpm-workspace.yaml(packages:[.], nodeLinker:hoisted, autoInstallPeers:false) | dsh-app-boot@lib/index.js:353 initProfile(源码核对) |
 | 安装后 bundle 自动加入 profile 的 dsh.profile.bundles 列表: pnpm add 成功后 reconcilePlugins 读安装后的 package.json, 凡声明 dsh.bundle.patch 的依赖即追加进 bundles(按依赖顺序); 移除 bundle 声明或 remove 则移出 | dsh@lib/plugin-9h8shc4d.js:46-78 reconcilePlugins(源码核对) |
@@ -52,7 +53,7 @@
 
 ```bash
 # 1. 安装(M1 验收动作; 首次会自动初始化 dsh-ssh-dev profile, 内含 dsh-base 层)
-dsh plugin --profile dsh-ssh-dev add /Users/haowu/Code/AI/dssh/packages/dsh-ssh
+dsh plugin --profile dsh-ssh-dev add <home>/Code/AI/dssh/packages/dsh-ssh
 
 # 2. 确认 bundle 已进入 profile(pnpm 转发; 同等于在 profile 目录跑 pnpm list)
 dsh plugin --profile dsh-ssh-dev list
@@ -88,7 +89,7 @@ cat ~/.dsh/profiles/dsh-ssh-dev/package.json
 | ssh2 hostVerifier 收到的是**原始 host key Buffer**(不设 hostHash 时), known_hosts 条目 = base64(原始 key 字节), 直接比较; host 匹配需同时覆盖 'host' 与 '[host]:port'(非 22 端口)两种写法 | ssh2/lib/client.js:273-291 + 实测 |
 | ssh2 仅在显式设置 agent 选项(如 SSH_AUTH_SOCK)时才尝试 agent 认证 | ssh2/lib/client.js:219-224 |
 | exec 通道: stream.on('close', (code, signal)) 的 code 即退出码; 另有 'exit' 事件; stdout=stream, stderr=stream.stderr | ssh2/README.md:71-87(官方示例) |
-| live smoke 实测输出: exec 'echo hi; hostname; uname -m' → exit 0 / hi / vm-remote-ubuntu / x86_64; sftp readText('/etc/hostname') → vm-remote-ubuntu; sftp listDir('/tmp') 前 3 条: mcp3.json, proxy_pool_deploy.log, server_run2.py | 实测 node packages/dsh-ssh/scripts/live-smoke.mjs |
+| live smoke 实测输出: exec 'echo hi; hostname; uname -m' → exit 0 / hi / <remote-host> / x86_64; sftp readText('/etc/hostname') → <remote-host>; sftp listDir('/tmp') 前 3 条: mcp3.json, proxy_pool_deploy.log, server_run2.py | 实测 node packages/dsh-ssh/scripts/live-smoke.mjs |
 
 **踩坑记录**:
 1. **本机 ssh-agent 无身份**(ssh-add -l → "The agent has no identities"): 纯 agent 认证会失败 → live-smoke 配置 auth={type:'key', privateKeyPath:'~/.ssh/id_ed25519'}(ssh2 同时带 agent 选项, agent 有身份时优先; 无则公钥回退), 与笔记 §6.5 "公钥认证 OK" 一致。
@@ -201,7 +202,7 @@ cat ~/.dsh/profiles/dsh-ssh-dev/package.json
 
 | 问题 | 结论 | 出处 |
 |---|---|---|
-| Q1 preset 目录格式 | 目录 = COMPOSITION_FILE `agent.cordis.yml` + 可选 METADATA_FILE `preset.yml`(字段仅 name?/description?/order?; order 小者在前, 缺省排最后按 id); 目录名即 preset id, 须匹配 /^[a-z0-9][a-z0-9-]*$/; 缺组合文件或不可解析 → 报 `broken`(占 id 不隐藏); readPresetMetadata 读/解析/形状失败一律降级 {}; renderPresetMetadata = yaml.dump(自动引号, 缺省字段省略, 全空则 undefined); scanRoot({path,trust}) 按 order→id 排序, discoverPresets(roots) 先根胜出 | dsh-agent-presets@lib/types/metadata.js:23,47-91; discovery.js:24,38,136-186; preset.js:10(本包: /opt/homebrew/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-presets); /tmp 实测 scanRoot/discoverPresets/metadata 往返 |
+| Q1 preset 目录格式 | 目录 = COMPOSITION_FILE `agent.cordis.yml` + 可选 METADATA_FILE `preset.yml`(字段仅 name?/description?/order?; order 小者在前, 缺省排最后按 id); 目录名即 preset id, 须匹配 /^[a-z0-9][a-z0-9-]*$/; 缺组合文件或不可解析 → 报 `broken`(占 id 不隐藏); readPresetMetadata 读/解析/形状失败一律降级 {}; renderPresetMetadata = yaml.dump(自动引号, 缺省字段省略, 全空则 undefined); scanRoot({path,trust}) 按 order→id 排序, discoverPresets(roots) 先根胜出 | dsh-agent-presets@lib/types/metadata.js:23,47-91; discovery.js:24,38,136-186; preset.js:10(本包: <dsh-checkout>/node_modules/@deepseek-ai/dsh-agent-presets); /tmp 实测 scanRoot/discoverPresets/metadata 往返 |
 | Q2 工具行方案(选 **B**) | 每个行 = 一次插件实例(cordis-plugin-loader entry._init/_start → registry.plugin(plugin, config)); 同名工具在同一 scope 层重复注册抛错(dsh-tools NamedEntries "already registered in this scope"); 单实例注册多工具是官方既有模式(dsh-tool-fs 一行注册 read/write/edit/read_image)。故三行 → 单行 `- id: tool-ssh / name: 'dsh-ssh/tools' / config: {}`: 少实例、单注册点、无需 toolMode 分派 API | cordis-plugin-loader@lib/index.js:512,522-533; dsh-tools@lib/index.js:2517; dsh-tool-fs@lib/index.js:333,604,749,952 |
 | Q3 同包双角色(选 **exports 子路径**) | preset loader 对裸说明符走 Node internal import(相对 harness base, 即 host 组合 baseUrl=profile 目录), 支持包 exports 子路径; 官方 standard 自身就用 `'@deepseek-ai/dsh-tool-subagent-control/list-agents'` 子路径行(该包 exports `./list-agents`)。定案: host 服务行 name: 'dsh-ssh' → index.js(不变); preset 工具行 name: 'dsh-ssh/tools' → **M3b 需在 dsh-ssh exports 增加 "./tools" 并实现工具入口**。运行期解析: profile 自身 node_modules + $DSH_HOME/profiles/node_modules 扁平回退(dsh-ssh 作为 profile bundle 可达) | dsh-agent-presets@lib/index.js:469-506(PresetTree.import, 尤 495-505); cordis-plugin-loader@lib/index.js:259-273; dsh-app-boot@lib/index.js:299-305,390-434; standard/agent.cordis.yml:184; dsh-tool-subagent-control/package.json(exports './list-agents') |
 | Q4 realm | 工具行只注册 tools、不 provide 服务 → 无需 isolate 组(与上游 tool-fs/tool-fs-search 同); mount 只拒绝向 ROOT realm 发布服务的行。tool-ssh 行顶层无 group/isolate, 合规 | standard/agent.cordis.yml:54-62 注释; dsh-agent-presets@lib/index.js:440-448(mount 守卫) |
@@ -274,7 +275,7 @@ cat ~/.dsh/profiles/dsh-ssh-dev/package.json
 
 | 事实 | 出处 |
 |---|---|
-| 暴露给配置客户端的 settings 命名空间是**硬编码白名单**, 第三方命名空间不在内: WEB_SETTINGS_NAMESPACES = ["agent-loop","shell","locale","permission","ui-conversation","ui-theme","web-search-deepseek"] | @deepseek-ai/dsh-host-apiproxy@lib/index.js:888(本机: /opt/homebrew/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js) |
+| 暴露给配置客户端的 settings 命名空间是**硬编码白名单**, 第三方命名空间不在内: WEB_SETTINGS_NAMESPACES = ["agent-loop","shell","locale","permission","ui-conversation","ui-theme","web-search-deepseek"] | @deepseek-ai/dsh-host-apiproxy@lib/index.js:888(本机: <dsh-checkout>/node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js) |
 | 白名单源码注释明确: "a namespace absent here answers settings-not-exposed even when its owner registered it… Moving that declaration to settings.register(), so a plugin can expose its own configuration without a change in this package, **is deferred work**" | 同文件 :880-887 |
 | 产品侧白名单同样封闭: PRODUCT_SETTINGS_NAMESPACES = new Set(["ui-onboarding", SETTINGS_NAMESPACE]) | 同文件 :1001 |
 | 判定与报错: exposedNamespaces()(model-provider ∪ 两个白名单) + notExposed() 返回 {code:"settings-not-exposed", message: settings namespace "<ns>" is not exposed to configuration clients}; describe 也按白名单过滤 | 同文件 :2410-2421(用户实测即此错误)、:3470-3474 |
@@ -344,67 +345,67 @@ cat ~/.dsh/profiles/dsh-ssh-dev/package.json
 
 ### A.8 Windows 本地安装收尾 + preset 同步实测(2026-08-18, 子代理)
 
-> 场景: Windows 本机, 隔离 profile dsh-ssh-dev, DSH_HOME=C:\Users\Administrator\.dsh(仅进程级 env; User/Machine 作用域未设)。本次只做 preset 落盘同步 + 全量检查 + 笔记回写, 全程未运行任何 `dsh plugin` 命令、未写 DSH core、未重启/干扰 GUI 进程(pid 9604)。
+> 场景: Windows 本机, 隔离 profile dsh-ssh-dev, DSH_HOME=<home>/.dsh(仅进程级 env; User/Machine 作用域未设)。本次只做 preset 落盘同步 + 全量检查 + 笔记回写, 全程未运行任何 `dsh plugin` 命令、未写 DSH core、未重启/干扰 GUI 进程(pid 9604)。
 
 **1. Windows 本地安装的确切命令与踩坑(已验证)**:
-- 安装命令: `dsh plugin --profile dsh-ssh-dev add "D:\Code\AI\ddsh\packages\dsh-ssh"`(本地路径, Windows 反斜杠)。
+- 安装命令: `dsh plugin --profile dsh-ssh-dev add "<repo>/packages/dsh-ssh"`(本地路径, Windows 反斜杠)。
 - **坑**: profile 目录是 pnpm workspace root(含 pnpm-workspace.yaml), 直接 add 报 `ERR_PNPM_ADDING_TO_ROOT`(pnpm 拒绝向 workspace root 写入依赖)。
-- **解法**: 在 `C:\Users\Administrator\.dsh\profiles\dsh-ssh-dev\.npmrc` 写入 `ignore-workspace-root-check=true`, 重跑同一条 add 成功。
+- **解法**: 在 `<home>/.dsh/profiles/dsh-ssh-dev/.npmrc` 写入 `ignore-workspace-root-check=true`, 重跑同一条 add 成功。
 - 出处: 主代理此前实测(本次复核); .npmrc 现内容即该行。
 
 **2. 安装后形态(link: 依赖 + bundles 数组 + dump-config 组合树, 本次复核)**:
-- profile `C:\Users\Administrator\.dsh\profiles\dsh-ssh-dev\package.json` → dependencies 含 `"@aaravarr/dsh-ssh": "link:D:/Code/AI/ddsh/packages/dsh-ssh"`(pnpm link: 本地路径依赖, 非发布版语义)。
-- 同文件 `dsh.profile.bundles` 数组含 `"@aaravarr/dsh-ssh"`(bundle 通道 add 时自动追加, 出处: A.3 调研 + 本次 dump-config)。
-- `dsh --profile dsh-ssh-dev --dump-config`(本次 2026-08-18 重跑)→ exit 0; 组合树含 `# == @aaravarr/dsh-ssh` → `- id: '@aaravarr/dsh-ssh' / name: '@aaravarr/dsh-ssh'` → `config.maxConnections: 4`。
+- profile `<home>/.dsh/profiles/dsh-ssh-dev/package.json` → dependencies 含 `"@dsh-ssh/dsh-ssh": "link:<repo>/packages/dsh-ssh"`(pnpm link: 本地路径依赖, 非发布版语义)。
+- 同文件 `dsh.profile.bundles` 数组含 `"@dsh-ssh/dsh-ssh"`(bundle 通道 add 时自动追加, 出处: A.3 调研 + 本次 dump-config)。
+- `dsh --profile dsh-ssh-dev --dump-config`(本次 2026-08-18 重跑)→ exit 0; 组合树含 `# == @dsh-ssh/dsh-ssh` → `- id: '@dsh-ssh/dsh-ssh' / name: '@dsh-ssh/dsh-ssh'` → `config.maxConnections: 4`。
 
 **3. preset 自动同步时机(--dump-config 不触发 apply, 已验证)**:
 - `--dump-config` 只组装 host profile 组合树并退出, **不执行插件 apply**(源码: dsh-app-boot 的 dump 分支), 因此 index.js 里的自动同步不跑: 安装后 `.agent-presets\standard-ssh` 不存在(dump-config 前后均无, 本次实证)。
 - 自动同步在 `apply()` 内: packages/dsh-ssh/index.js:90-96, `installBundledPreset()`(index.js:22 导出, home/fs 可注入)由 `config.autoInstallPreset !== false` 守卫, 失败仅 warn 不阻塞宿主启动。
-- 触发方式二选一: ① 真正启动 dsh 服务(apply 阶段执行); ② 手工 `node packages/dsh-ssh/scripts/install-preset.mjs [--dry-run] [--home <dir>]`(home 来源顺序: --home 参数 → $DSH_HOME env → os.homedir()/.dsh; 本次显式 `--home C:\Users\Administrator\.dsh`)。
+- 触发方式二选一: ① 真正启动 dsh 服务(apply 阶段执行); ② 手工 `node packages/dsh-ssh/scripts/install-preset.mjs [--dry-run] [--home <dir>]`(home 来源顺序: --home 参数 → $DSH_HOME env → os.homedir()/.dsh; 本次显式 `--home <home>/.dsh`)。
 
 **4. 本次 preset 同步实测(2026-08-18)**:
 ```bat
-cd D:\Code\AI\ddsh\packages\dsh-ssh
-node scripts/install-preset.mjs --dry-run --home C:\Users\Administrator\.dsh
-node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
+cd <repo>/packages/dsh-ssh
+node scripts/install-preset.mjs --dry-run --home <home>/.dsh
+node scripts/install-preset.mjs --home <home>/.dsh
 ```
-输出: `[dry-run] 将安装到: C:\Users\Administrator\.dsh\.agent-presets\standard-ssh / 内容: agent.cordis.yml, preset.yml` → `installed: ...agent.cordis.yml / ...preset.yml` → `done`, exit 0。
-- 结果: 目标目录含 `agent.cordis.yml`(14201B)+ `preset.yml`(214B); agent.cordis.yml 第 57 行工具行 `- id: tool-ssh / name: '@aaravarr/dsh-ssh/tools' / config: {}`; tools.js 注册六工具 bash/read/write/edit/read_image/glob/grep(register 于 438/502/568/628/684/740/789 行, 843 行日志字面量印证)。
+输出: `[dry-run] 将安装到: <home>/.dsh/.agent-presets/standard-ssh / 内容: agent.cordis.yml, preset.yml` → `installed: ...agent.cordis.yml / ...preset.yml` → `done`, exit 0。
+- 结果: 目标目录含 `agent.cordis.yml`(14201B)+ `preset.yml`(214B); agent.cordis.yml 第 57 行工具行 `- id: tool-ssh / name: '@dsh-ssh/dsh-ssh/tools' / config: {}`; tools.js 注册六工具 bash/read/write/edit/read_image/glob/grep(register 于 438/502/568/628/684/740/789 行, 843 行日志字面量印证)。
 - 注意①: preset 是**会话级选择**, 不入 host 组合 → dump-config 看不到 standard-ssh 层属正常(同 Q1/Q4 调研)。注意②: preset 生成头注释仍写"五工具/glob/grep 待后续", 属生成注释滞后于 M3c, 不影响运行, 待 M5 更新 build-preset 文案。
 
 **5. 收尾检查清单(2026-08-18 逐项实测)**:
-- a. GUI 进程 9604: `Get-Process -Id 9604` → alive, node.exe(path=D:\Scoop\apps\nodejs\current\node.exe); 全程未重启/未 kill ✓
+- a. GUI 进程 9604: `Get-Process -Id 9604` → alive, node.exe(path=node.exe); 全程未重启/未 kill ✓
 - b. 其他 profile 未污染: web 与 test-max 的 package.json + cordis.patch.yml, 操作前后 SHA256 逐字节一致(mtime 亦未变) ✓
-- c. dump-config: 重跑 exit 0 且含 @aaravarr/dsh-ssh 层(maxConnections: 4) ✓
-- d. DSH core 未改: D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh 全程只读(根目录/package.json mtime+sha256 前后一致); 本次唯一落盘 = .agent-presets/standard-ssh 两个新文件(纯附加) ✓
+- c. dump-config: 重跑 exit 0 且含 @dsh-ssh/dsh-ssh 层(maxConnections: 4) ✓
+- d. DSH core 未改: <dsh-checkout> 全程只读(根目录/package.json mtime+sha256 前后一致); 本次唯一落盘 = .agent-presets/standard-ssh 两个新文件(纯附加) ✓
 - e. 红线核对: 未装 default profile(未运行 dsh plugin)、未写 core、未重启 GUI ✓
 
 **6. 遗留/风险**: ① standard-ssh 首次进入真正的 dsh 会话启动时, index.js 的自动同步会幂等覆盖同名文件(与手工结果一致); ② `.npmrc` 的 ignore-workspace-root-check=true 是 profile 本地配置, 卸载插件后仍残留(可接受, 如需清理可手删); ③ preset 文案滞后(五工具 vs 六工具)列 M5。
 
 ### A.9 dsh-ssh-dev 加装官方 web-app + 独立 Web 服务实测(2026-08-18, 子代理)
 
-> 场景: Windows 本机, 隔离 profile dsh-ssh-dev; 目标 = 在隔离 profile 上起官方 web UI 体验 @aaravarr/dsh-ssh。核心结论 + 全部命令/输出实记如下。
+> 场景: Windows 本机, 隔离 profile dsh-ssh-dev; 目标 = 在隔离 profile 上起官方 web UI 体验 @dsh-ssh/dsh-ssh。核心结论 + 全部命令/输出实记如下。
 
 **1. 关键结论(出处: bin.js 源码 + 本次双端实测)**:
-- `dsh web` 是 `--profile web` 的**硬编码别名**, 拒绝任何 --profile(源码 D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh\lib\bin.js) → 在自定义 profile 起 web UI 的**正确姿势 = `dsh plugin --profile <name> add @deepseek-ai/dsh-web-app` + `dsh --profile <name> --port N`**; 单独 `dsh --profile dsh-ssh-dev web` 会报 "web takes none of parent --profile"。
+- `dsh web` 是 `--profile web` 的**硬编码别名**, 拒绝任何 --profile(源码 <dsh-checkout>\lib\bin.js) → 在自定义 profile 起 web UI 的**正确姿势 = `dsh plugin --profile <name> add @deepseek-ai/dsh-web-app` + `dsh --profile <name> --port N`**; 单独 `dsh --profile dsh-ssh-dev web` 会报 "web takes none of parent --profile"。
 
 **2. 安装(registry 包, 走 npm 同款 pnpm 解析)**:
 - 失败命令: `dsh plugin --profile dsh-ssh-dev add @deepseek-ai/dsh-web-app`(latest=0.0.1-rc.1) → `ERR_PNPM_FETCH_404 GET registry.npmjs.org/@deepseek-ai/dsh-client-ui-models`: 该私有包未发布, `npm view` 亦 404。
 - **成功命令**: `dsh plugin --profile dsh-ssh-dev add @deepseek-ai/dsh-web-app@next` → 安装 @deepseek-ai/dsh-web-app@**0.1.0-rc.7**(2m36s, EXIT=0, ~230 包; 若干 ECONNRESET 网络重试自动成功)。
 - 为什么用 @next: core dsh 版本 = 0.1.0-rc.7, 与 @next 同代; latest(0.0.1-rc.1) 是旧代且携未发布依赖。判断依据: `npm view @deepseek-ai/dsh-web-app dist-tags`(latest=0.0.1-rc.1, next=0.1.0-rc.7) + 各版本 dependencies 对比(dsh-client-ui-models 仅 latest 有)。
-- 结果: dsh-ssh-dev/package.json → dependencies += `"@deepseek-ai/dsh-web-app": "0.1.0-rc.7"`; dsh.profile.bundles = ["@deepseek-ai/dsh-base", "@aaravarr/dsh-ssh", "@deepseek-ai/dsh-web-app"]。
+- 结果: dsh-ssh-dev/package.json → dependencies += `"@deepseek-ai/dsh-web-app": "0.1.0-rc.7"`; dsh.profile.bundles = ["@deepseek-ai/dsh-base", "@dsh-ssh/dsh-ssh", "@deepseek-ai/dsh-web-app"]。
 
 **3. 安装验证(dump-config)**:
-- `dsh --profile dsh-ssh-dev --dump-config` → EXIT=0; 组合树含 `# == @deepseek-ai/dsh-web-app` 层(name: '@deepseek-ai/dsh-web-app/startup'、webserver: '@deepseek-ai/dsh-host-webserver'), 多处 `# == @deepseek-ai/dsh-base, patched by @deepseek-ai/dsh-web-app`; @aaravarr/dsh-ssh 层仍在(maxConnections: 4)。
+- `dsh --profile dsh-ssh-dev --dump-config` → EXIT=0; 组合树含 `# == @deepseek-ai/dsh-web-app` 层(name: '@deepseek-ai/dsh-web-app/startup'、webserver: '@deepseek-ai/dsh-host-webserver'), 多处 `# == @deepseek-ai/dsh-base, patched by @deepseek-ai/dsh-web-app`; @dsh-ssh/dsh-ssh 层仍在(maxConnections: 4)。
 
 **4. 启动独立服务(3090)**:
-- dsh CLI 是 dsh.ps1 shim; 直接用 node 起 bin.js 更稳: `Start-Process -FilePath D:\Scoop\apps\nodejs\current\node.exe -ArgumentList @("D:\Scoop\apps\nodejs\current\bin\node_modules\@deepseek-ai\dsh\lib\bin.js","--profile","dsh-ssh-dev","--port","3090") -RedirectStandardOutput web.log -RedirectStandardError web.err.log -WindowStyle Hidden -PassThru`(命令内显式设置 $env:DSH_HOME=C:\Users\Administrator\.dsh; 3090 起前 netstat 确认空闲)。
+- dsh CLI 是 dsh.ps1 shim; 直接用 node 起 bin.js 更稳: `Start-Process -FilePath node.exe -ArgumentList @("<dsh-checkout>/lib/bin.js","--profile","dsh-ssh-dev","--port","3090") -RedirectStandardOutput web.log -RedirectStandardError web.err.log -WindowStyle Hidden -PassThru`(命令内显式设置 $env:DSH_HOME=<home>/.dsh; 3090 起前 netstat 确认空闲)。
 - 服务 PID=**44284**(记录于 profiles\dsh-ssh-dev\web.pid); 访问 URL **http://127.0.0.1:3090**; 日志 web.log 首行为 `dsh web: http://127.0.0.1:3090`, web.err.log 空。
 - 验证: Invoke-WebRequest http://127.0.0.1:3090 -UseBasicParsing → **StatusCode=200**, body 12237B, 首字节 `<!doctype html><html lang="zh-CN">` + `window.__DSH_BOOT__` 注入 + title "DeepSeek Harness"; netstat 显示 TCP 127.0.0.1:3090 LISTENING PID 44284。
 
 **5. 本次新踩坑: 真实启动时 link: 插件的 peer 解析失败(重要, 后续 dsh-dev 会话/启动会再遇到)**:
-- 首启崩: `ERR_MODULE_NOT_FOUND: Cannot find package '@deepseek-ai/cordis' imported from D:\Code\AI\ddsh\packages\dsh-ssh\index.js`(web.err.log)。
-- 根因: @aaravarr/dsh-ssh 以 `link:D:/Code/AI/ddsh/packages/dsh-ssh` 安装, ESM 按**真实路径**从仓库目录向上解析 peer; 该机器上仓库 D:\Code\AI\ddsh 此前**没有 node_modules**(peer 其实在共享层 profiles\node_modules, 但解析路径不经过它)。--dump-config 不 import 插件源码所以此前未暴露。
+- 首启崩: `ERR_MODULE_NOT_FOUND: Cannot find package '@deepseek-ai/cordis' imported from <repo>/packages/dsh-ssh/index.js`(web.err.log)。
+- 根因: @dsh-ssh/dsh-ssh 以 `link:<repo>/packages/dsh-ssh` 安装, ESM 按**真实路径**从仓库目录向上解析 peer; 该机器上仓库 <repo> 此前**没有 node_modules**(peer 其实在共享层 profiles/node_modules, 但解析路径不经过它)。--dump-config 不 import 插件源码所以此前未暴露。
 - 修复(落点 = 项目仓库自身依赖, 不碰 core/profile): 仓库根 `pnpm install --frozen-lockfile`(EXIT=0, 29s; lockfileVersion 9.0, **pnpm-lock.yaml 未被改写** git 验证; ssh2/cpu-features 原生编译失败为可选绑定, 警告不阻塞) → peer 落入 packages/dsh-ssh/node_modules/@deepseek-ai/(cordis/dsh-fs/dsh-settings/dsh-shell/dsh-tools/dsh-typert-protocol/dsh-sandbox/dsh-client-ui-primitives/schemastery, 均 rc.6/cordis 4.0.1) → 仓库内 `import('./index.js')` 验证 OK → 服务正常起。
 
 **6. 红线确认(本次逐项)**: GUI PID 9604(node)起服务前(Get-Process)与起服务后均 alive ✓; 未改 default/web/test-max profile、未改 DSH core; 落盘只发生在 dsh-ssh-dev profile(依赖+bundles+web.log/err.log/web.pid)与仓库 node_modules(.gitignore 覆盖)。唯一 git 可见改动 = 本笔记文件(A.8 既有 + 本节 A.9)。
@@ -431,7 +432,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 **3. 验证(重启 3090 服务)**:
 - 停旧 PID 44284 → 3090 无 LISTEN; 按 A.9 §4 相同方式重启(node bin.js --profile dsh-ssh-dev --port 3090, $env:DSH_HOME 显式, 日志覆盖), 新 PID **63940**(web.pid)。
-- `Invoke-WebRequest http://127.0.0.1:3090` → **HTTP 200**; `__DSH_BOOT__` 列出插件入口 `/plugins/@aaravarr/dsh-ssh/client.js?rev=13e7d98d56d1`。
+- `Invoke-WebRequest http://127.0.0.1:3090` → **HTTP 200**; `__DSH_BOOT__` 列出插件入口 `/plugins/@dsh-ssh/dsh-ssh/client.js?rev=13e7d98d56d1`。
 - 抓取该 bundle(74798B): 含 `sshService`、`ctx.inject(["remote.ssh"]`、`sshCtx.remote.ssh`、死锁注释、`function getSsh() { return sshService; }`; **不含 remoteReady** → 新代码已进入交付 bundle。
 - `node --check client.js` → SYNTAX OK。
 - web.err.log = 0 字节; web.log 首行 `dsh web: http://127.0.0.1:3090`; netstat 3090 LISTENING 属主 63940。
@@ -459,13 +460,13 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - 插件自己的 verify-host-key 分类文案(ssh-core.js verifyHostKey: 'unknown host key for ...' / 'host key mismatch for ...')在旧代码里被 ssh2 原文覆盖(原 _connectInner client.on('error') 只传 err.message)。
 
 **2. 根因机制(出处行号, 修复前)**:
-- 保存的主机配置无 knownHostsPath 字段: C:\\Users\\Administrator\\.dsh\\settings.yaml:80-90 仅 id/name/host/port/user/auth。
+- 保存的主机配置无 knownHostsPath 字段: <home>/.dsh/settings.yaml:80-90 仅 id/name/host/port/user/auth。
 - schema 注释声称"缺省 ~/.ssh/known_hosts"(src/settings.js:29), 但实现无 fallback: 原 ssh-core.js:121-124 `_readKnownHosts` `if (!p) return []` → 缺省 = **不读任何文件**。
 - 透传侧只带显式保存值: lib/hosts-model.js:273 `if (!c.knownHostsPath && s?.knownHostsPath) merged.knownHostsPath = s.knownHostsPath`。
 - 结果链: entries=[] → 收到真实 host key 判 'unknown'(文件根本没读, 即便 known_hosts 里有 plain 记录) → verifyHostKey 抛 SshError → makeHostVerifier verify(false)(ssh-core.js:105-113) → ssh2 报 "Host denied (verification failed)" → _connectInner reject(ssh2 原文)。
 
 **3. known_hosts 记录实况**(<home>/.ssh/known_hosts):
-- 203.0.113.10 有 **3 条 plain(非 hashed)** 记录(第 14-16 行): ssh-ed25519 / ssh-rsa / ecdsa-sha2-nistp256; 另有 [203.0.113.10]:16611/:16612 端口条目。
+- 203.0.113.10 有 **3 条 plain(非 hashed)** 记录(第 14-16 行): ssh-ed25519 / ssh-rsa / ecdsa-sha2-nistp256; 另有 [203.0.113.10]:<ssh-port> 端口条目。
 - hashed(|1|) 条目本机无; 插件原实现不支持 hashed(ssh-core.js:31 注释文档化局限)——本次一并补上(OpenSSH 默认 HashKnownHosts=no, 但开过的用户会中招)。
 
 **4. 修复内容**(packages/dsh-ssh/src/ssh-core.js, plain JS, 无构建):
@@ -475,9 +476,9 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - 测试: test/ssh-core.test.js +6(hashed 解析/匹配、defaultKnownHostsPath、ENOENT→[]、makeHostVerifier 分类保真)。
 
 **5. 验证证据(命令+输出)**:
-- 仓库直连复现(临时脚本 D:\\Code\\AI\\ddsh\\.agents\\tmp\\repro.mjs, 已清理; import src/ssh-core.js 用与 settings.yaml 完全一致的 cfg):
+- 仓库直连复现(临时脚本 <repo>/.agents/tmp/repro.mjs, 已清理; import src/ssh-core.js 用与 settings.yaml 完全一致的 cfg):
   - 修复前: `testConnection(无 knownHostsPath) => {"ok":false,"error":"Host denied (verification failed)"}`(与 UI 报错一致)。
-  - 修复后: `=> {"ok":true,"banner":"ok"}`; 显式 knownHostsPath 同样 ok; 远端 `hostname; uname -a` → `vm-remote-ubuntu Linux 5.15.0-106-generic ...`。
+  - 修复后: `=> {"ok":true,"banner":"ok"}`; 显式 knownHostsPath 同样 ok; 远端 `hostname; uname -a` → `<remote-host> Linux 5.15.0-106-generic ...`。
 - 重启 3090: Stop-Process 63940 → `dsh --profile dsh-ssh-dev --port 3090`(后台, 新 PID 62712); netstat 3090 LISTENING 属主 62712; Invoke-WebRequest http://127.0.0.1:3090 → HTTP 200。
 - Typert 网关在线: `POST /api/ssh/listHosts`(payload {"args":{}}) → `{"ok":true,"value":{"hosts":{...},"revision":0,"writable":true}}` → bundle 已加载、dsh-ssh-hosts settings 读通(主机 dict 与 settings.yaml 一致)。
 - 单测: `node --test test/*.test.js` → **pass 145 / fail 10**(新增 6 个全过; 10 个失败 = Windows path.sep 既有问题——stash 掉本次改动后基线仍 pass 139/fail 10, 与本修改无关)。
@@ -497,7 +498,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - ssh-core 层: 直连脚本(import src/ssh-core.js, cfg 与 settings.yaml 完全一致)跑 pool.testConnection → ok; acquire → exec('echo $HOME') → {code:0, stdout:"/home/ubuntu"}; sftp.listDir('/home/ubuntu') → 54 项。连接层无问题。
 - 服务层: 真实 SshRemoteService(cordis Context + 真实 SshPool + setStoredResolver) → resolveRemoteHome(hostId) 返回裸字符串 "/home/ubuntu"; listRemoteDir 返回裸数组(54 项)。服务层无问题。
 - 网关层(根因): core dsh-api-gateway 把 host 方法返回值统一包装成 { ok: true, value }(成功)/{ ok: false, error }(业务失败):
-  - host 端: D:/Scoop/persist/nodejs/bin/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-api-gateway/lib/index.js:123-131(invokeRpc 返回 {ok:true, value: await this.invoke(...)})。
+  - host 端: <dsh-checkout>/node_modules/@deepseek-ai/dsh-api-gateway/lib/index.js:123-131(invokeRpc 返回 {ok:true, value: await this.invoke(...)})。
   - client 端: 同包 lib/client.js:258-265(client 侧 promise resolve 的形状 = {ok:true, value: parse(descriptor.result, ...)})。
 - UI 层(病点): client.js 的 startBrowse(修复前 ~1181-1188)把 resolve 值当裸字符串判定 typeof home === 'string' && home.startsWith('/'); 实际收到的是对象 {ok:true, value:'/home/ubuntu'} → 判定失败 → 走 1187 分支 setError('读取远端目录失败: resolveRemoteHome 返回异常') —— 与用户看到文案逐字一致。注意此分支是 resolve 成功但形状不符, 不是 reject(reject 走 messageOf 会显示真实错误)。
 
@@ -527,19 +528,19 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 > 场景: http://127.0.0.1:3090(dsh-ssh-dev profile, PID 52700) 新建会话选工作区 -> 选"本地" tab -> 报「读取目录失败 - host.listDirectory needs the browse capability; the composed picker serves "native"」。对照: 用户日常 GUI(web profile, 3080, PID 9604) 本地目录浏览正常。任务书假设"web 有 browse capability、dsh-ssh-dev 缺"——该假设经查证不成立。
 
 **1. 排查过程与关键证据**:
-- `dsh --profile web --dump-config` 与 `dsh --profile dsh-ssh-dev --dump-config` 各存临时文件 diff: 静态组合几乎一致, 两边都只有一条 `directory-picker: @deepseek-ai/dsh-host-directory-picker-auto`(web dump 行 390-391 / dsh-ssh-dev dump 行 395-396), 均无独立 browse 条目; 差异仅为 web 多 trustedHosts patch、dsh-ssh-dev 多 @aaravarr/dsh-ssh。说明 dump-config 无法直接看出 browse/native 差异。
-- 读 `@deepseek-ai/dsh-host-directory-picker-auto` 源码(D:/Scoop/persist/nodejs/bin/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-directory-picker-auto/lib/index.js): 该包是运行时决议器, apply() 里按 boot 采样事实 `resolveDirectoryPickerBackend`(行 63-69) 选 browse/native, 再用 `loader.create` 动态挂载后端 + client 表面(行 117-139)。决议条件: `bindHost !== "127.0.0.1" -> browse`; 有 `SSH_CONNECTION/SSH_TTY -> browse`; `darwin/win32 -> native`(弹系统对话框); linux 无 zenity/kdialog 或无 DISPLAY -> browse。
+- `dsh --profile web --dump-config` 与 `dsh --profile dsh-ssh-dev --dump-config` 各存临时文件 diff: 静态组合几乎一致, 两边都只有一条 `directory-picker: @deepseek-ai/dsh-host-directory-picker-auto`(web dump 行 390-391 / dsh-ssh-dev dump 行 395-396), 均无独立 browse 条目; 差异仅为 web 多 trustedHosts patch、dsh-ssh-dev 多 @dsh-ssh/dsh-ssh。说明 dump-config 无法直接看出 browse/native 差异。
+- 读 `@deepseek-ai/dsh-host-directory-picker-auto` 源码(<dsh-checkout>/node_modules/@deepseek-ai/dsh-host-directory-picker-auto/lib/index.js): 该包是运行时决议器, apply() 里按 boot 采样事实 `resolveDirectoryPickerBackend`(行 63-69) 选 browse/native, 再用 `loader.create` 动态挂载后端 + client 表面(行 117-139)。决议条件: `bindHost !== "127.0.0.1" -> browse`; 有 `SSH_CONNECTION/SSH_TTY -> browse`; `darwin/win32 -> native`(弹系统对话框); linux 无 zenity/kdialog 或无 DISPLAY -> browse。
 - netstat 实证: 两个服务都监听 `127.0.0.1:3080/3090`, 同一 win32 主机, 无 SSH 环境 -> 两个 profile 的 host 决议结果都是 native(与任务书"web 是 browse"的推断相反), `dsh web` 是 `--profile web` 的硬编码别名(bin.js:19,91)。
 - 客户端运行时实证: 抓两服务首页 `window.__DSH_BOOT__` 模块表, 两者都只含 `@deepseek-ai/dsh-client-ui-directory-picker-native`(web 第 38 项 / dsh-ssh-dev 第 39 项), 都没有 `...-picker-browse`; HTTP 探测 `/plugins/@deepseek-ai/dsh-client-ui-directory-picker-browse/client.js` 两服务均 404, native 均 200。运行时挂载的都是 native 表面。
 - 错误出处: `@deepseek-ai/dsh-host-apiproxy/lib/index.js:3174-3180`(host.listDirectory 要求 capability.kind === "browse", 否则报 directory-picker-unavailable + 文案逐字一致); client-runtime 的 `ctx.workspaces.listDirectory` 直连此 API(dsh-client-runtime/lib/client.js:9965-9969)。
 
 **2. 根因结论(不是缺包, 是插件本地 tab 依赖 browse capability)**:
 - browse 官方包存在且版本齐全(dsh-host-directory-picker-browse + dsh-client-ui-directory-picker-browse 均为 0.1.0-rc.7, core node_modules 与 profiles/node_modules 都有), 它由 auto 包按决议动态挂载, 不是通过 plugin add 安装的 bundle 包(其 package.json 无 dsh.bundle/client 声明)。
-- 真正差异在客户端 directoryFlow 槽的占用者: web(无 @aaravarr/dsh-ssh) 本地 tab 由 stock native picker(dsh-client-ui-directory-picker-native) 填充, 它 renderless 直接调 `ctx.workspaces.pickDirectory()` 弹系统对话框(不调用 listDirectory)-> 正常; 而 dsh-ssh-dev 装了我们的插件, `packages/dsh-ssh/client.js:1505-1549` 以 priority -1 覆盖 BOTH directoryFlow 槽并注册 DirectoryFlowCombined, 其本地 tab 的 listDirectory/createDirectory 走 `ctx.workspaces.listDirectory`(client.js:1531-1532) -> 命中 host.listDirectory 的 browse 检查 -> 报错。
+- 真正差异在客户端 directoryFlow 槽的占用者: web(无 @dsh-ssh/dsh-ssh) 本地 tab 由 stock native picker(dsh-client-ui-directory-picker-native) 填充, 它 renderless 直接调 `ctx.workspaces.pickDirectory()` 弹系统对话框(不调用 listDirectory)-> 正常; 而 dsh-ssh-dev 装了我们的插件, `packages/dsh-ssh/client.js:1505-1549` 以 priority -1 覆盖 BOTH directoryFlow 槽并注册 DirectoryFlowCombined, 其本地 tab 的 listDirectory/createDirectory 走 `ctx.workspaces.listDirectory`(client.js:1531-1532) -> 命中 host.listDirectory 的 browse 检查 -> 报错。
 - 即: host 两边都是 native, 但 web 端没人调 listDirectory; dsh-ssh-dev 端我们的插件调了 listDirectory 而 host 是 native -> 报 browse 缺失。
 
 **3. 修复方案(按任务书第 5 步: 根因不是缺包 -> 报告机制与方案, 不硬改)**:
-- 方案 A(推荐, 改 dsh-ssh-dev host 决议为 browse): 在 `C:/Users/Administrator/.dsh/profiles/dsh-ssh-dev/cordis.patch.yml`(当前为 `[]`) 覆盖 directory-picker 条目 pin 为 browse 后端, 使 host.listDirectory 可用。参考 web-app 源码注释 "Mount -native or -browse directly in an overlay to pin the interaction"(dsh-web-app/cordis.patch.yml 行 87-91)。需要主代理确认后实施并重启 3090 验证。
+- 方案 A(推荐, 改 dsh-ssh-dev host 决议为 browse): 在 `<home>/.dsh/profiles/dsh-ssh-dev/cordis.patch.yml`(当前为 `[]`) 覆盖 directory-picker 条目 pin 为 browse 后端, 使 host.listDirectory 可用。参考 web-app 源码注释 "Mount -native or -browse directly in an overlay to pin the interaction"(dsh-web-app/cordis.patch.yml 行 87-91)。需要主代理确认后实施并重启 3090 验证。
 - 方案 B(改插件本地 tab 降级): `packages/dsh-ssh/client.js` DirectoryFlowCombined 本地 tab 在 listDirectory 抛 browse 缺失时回退到 `ctx.workspaces.pickDirectory()`(系统对话框, 与 web 行为一致), 或先探测 capability。待主代理决策。
 - 不建议直接 `dsh plugin add` browse 包: 该包无 bundle/client 声明, plugin add 不会把它挂进组合, 装了就白装(可先 `dsh plugin --profile dsh-ssh-dev add <pkg>@next` 试装, 预期 dump-config 无变化)。
 
@@ -567,7 +568,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - 我们的病点: packages/dsh-ssh/client.js DirectoryFlowCombined(以 priority -1 覆盖 conversation.hero.workspace.directoryFlow + sidebar.workspaces.directoryFlow 双槽)本地 tab 的 listDirectory/createDirectory 走 ctx.workspaces.listDirectory/createDirectory(injectedFlow) → 首屏 list(undefined) 即命中 host browse 门槛 → UI 报「读取目录失败 — host.listDirectory needs the browse capability…」, 本地 tab 完全不可用。
 
 **2. 决策: 方案 B(插件本地 tab 降级), 不采用方案 A(profile patch pin browse)**:
-- 方案 A 需在 C:/Users/Administrator/.dsh/profiles/dsh-ssh-dev/cordis.patch.yml 覆盖 directory-picker 后端 pin 为 browse —— 这改变的是 host 交互模型(把"系统对话框"换成自绘浏览树), 且依赖 web-app 内部 overlay 写法, 对用户 GUI 习惯(系统对话框选目录)不友好; 换一台 linux 主机时决议又变 browse, 方案 A 会造成行为不一致。
+- 方案 A 需在 <home>/.dsh/profiles/dsh-ssh-dev/cordis.patch.yml 覆盖 directory-picker 后端 pin 为 browse —— 这改变的是 host 交互模型(把"系统对话框"换成自绘浏览树), 且依赖 web-app 内部 overlay 写法, 对用户 GUI 习惯(系统对话框选目录)不友好; 换一台 linux 主机时决议又变 browse, 方案 A 会造成行为不一致。
 - 方案 B 只动插件: 本地 tab 在探测到 browse 缺失后回退官方原生对话框(ctx.workspaces.pickDirectory), 与"本地工作区行为完全不变"的硬约束(agents.md §2)吻合, 也符合任务书推荐的第 b 条检测路径(首次 listDirectory 失败且错误含 "needs the browse capability" → 回退并记住状态)。全局可移植: host 决议 native 或 browse 都成立(browse 时走原列表 UI, native 时走系统对话框)。
 
 **3. 修复 diff 摘要**(plain JS/ES5, 无构建; 沿用"lib 为 canonical、client.js 内联同步"惯例):
@@ -578,8 +579,8 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 **4. 回归测试**: test/remote-wire.test.js 追加 3 例(import 增 isBrowseCapabilityError): DirectoryBrowseError 形状命中; createDirectory(native host)/普通 Error/其他业务码/裸串/null/undefined 判否; 仅 message 无 rpcError 也命中。全套 node --test test/*.test.js → tests 162 / pass 152 / fail 10, fail 10 与 A.11/A.13 基线相同(Windows path.sep 既有问题: placeholder/router/search 相关, 与本改动无关), 无退化(149 基线 + 3 新增 = 152)。
 
 **5. 验证证据(统一重启, 远端修复一并生效)**:
-- 停 PID 52700(3090 dsh-ssh-dev) → 同方式重启: Start-Process node.exe bin.js --profile dsh-ssh-dev --port 3090($env:DSH_HOME=C:\Users\Administrator\.dsh, 日志覆盖 profiles\dsh-ssh-dev\web.log / web.err.log, 新 PID 写 web.pid)。新 PID 45220, web.log="dsh web: http://127.0.0.1:3090", web.err.log 0 字节, netstat 3090 LISTENING 45220。
-- Invoke-WebRequest http://127.0.0.1:3090 → 200; 抓 /plugins/@aaravarr/dsh-ssh/client.js(79391 字节)grep 特征串: isBrowseCapabilityError / local.nativeHint / needs the browse capability / pickDirectory 全部 True(新代码已进入交付 bundle)。
+- 停 PID 52700(3090 dsh-ssh-dev) → 同方式重启: Start-Process node.exe bin.js --profile dsh-ssh-dev --port 3090($env:DSH_HOME=<home>/.dsh, 日志覆盖 profiles/dsh-ssh-dev/web.log / web.err.log, 新 PID 写 web.pid)。新 PID 45220, web.log="dsh web: http://127.0.0.1:3090", web.err.log 0 字节, netstat 3090 LISTENING 45220。
+- Invoke-WebRequest http://127.0.0.1:3090 → 200; 抓 /plugins/@dsh-ssh/dsh-ssh/client.js(79391 字节)grep 特征串: isBrowseCapabilityError / local.nativeHint / needs the browse capability / pickDirectory 全部 True(新代码已进入交付 bundle)。
 - Typert 网关: POST /api/ssh/listHosts, 请求信封需为 {type:"client-request", rpcId, method:"ssh/listHosts", payload:{args:{}}}(裸 {} 被拒: 先报 bad-request 缺 rpcId/method, 再报 "Remote payload must contain exactly one plain-object args field")→ {"result":{"ok":true,"value":{"hosts":{00000000-0000-4000-8000-000000000000:{name:"ubuntu",host:"203.0.113.10",port:22,user:"ubuntu",auth:{type:"key",privateKeyPath:"<home>/.ssh/id_ed25519"}},"secrets":[],"revision":0,"writable":true}}}。
 - 红线: 未碰 PID 9604(3080 GUI, 存活); 未改 DSH core; 远端 203.0.113.10 未连接。
 
@@ -612,7 +613,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 ### A.19 调研: 远端工作区在 PTC(code-mode / run_code)形态下的支持现状(2026-08-19, 审计子代理)
 
-**范围与方法**: 纯审计 + 实测; 未改任何代码、未重启服务(3090/9604 未触碰); 以 git HEAD cdf9291 为审计基准(工作区 tools.js/index.js 有他方修改, 不计入); 实测在本地 DSH 宿主进程的 code runtime worker 内完成, 未连接远端主机。core 只读参考: D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh(下文 core)。
+**范围与方法**: 纯审计 + 实测; 未改任何代码、未重启服务(3090/9604 未触碰); 以 git HEAD cdf9291 为审计基准(工作区 tools.js/index.js 有他方修改, 不计入); 实测在本地 DSH 宿主进程的 code runtime worker 内完成, 未连接远端主机。core 只读参考: <dsh-checkout>(下文 core)。
 
 **Q1 run_code 工具体系与 scope 注册表 —— 确认经过**:
 - run_code 由 @deepseek-ai/dsh-tools 提供: createRunCodeTool(core dsh-tools/lib/index.js:1083); 保留名 RUN_CODE_NAME(:893); register() 拒绝同名注册/遮蔽(:2769); view() 在 mode 非 native 时注入 run_code(:2863)。
@@ -629,12 +630,12 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 **Q3 执行位置与沙箱 —— 本地 worker, 可绕过(node:fs 实测成功)**:
 - 程序本体在**本地 worker thread** 执行: new Worker(WORKER_PATH, {workerData, env: {}, execArgv: [], resourceLimits:{maxOldGenerationSizeMb}, stdout:true, stderr:true})(core dsh-code-runtime-worker-thread/lib/index.js:737-752); 程序以 new AsyncFunction(...) 编译执行(worker.cjs:884-887), 绑定经消息端口桥接(worker.cjs:806-845), 端口入站全部重校验(host index.js:532-571)。
 - 模块总文档明示 "This is containment, not a security boundary: model code has bash-equivalent trust"(index.js:451-457)。**无模块白名单、无 import/require 拦截、无自定义 loader、无 cwd/import map**。
-- **实测**(在本 DSH 宿主进程 code runtime 内执行 run_code): await import('node:fs') 直接写文件成功(写入 D:/Code/AI/ddsh/.agents/tmp/ptc-bypass-test.txt, 已清理); 读任意本地绝对路径成功(如 C:/Users/Administrator/.dsh/settings.yaml 内容可读出), 完全不受工具层 path 路由影响; await import('node:child_process') execSync 成功; worker 的 process.env 为空(env:{} 生效, envCount=0)。
+- **实测**(在本 DSH 宿主进程 code runtime 内执行 run_code): await import('node:fs') 直接写文件成功(写入 <repo>/.agents/tmp/ptc-bypass-test.txt, 已清理); 读任意本地绝对路径成功(如 <home>/.dsh/settings.yaml 内容可读出), 完全不受工具层 path 路由影响; await import('node:child_process') execSync 成功; worker 的 process.env 为空(env:{} 生效, envCount=0)。
 - 结论: **PTC 下模型可用 node:fs / node:child_process 在本地执行文件操作与进程, 绕过工具层 → 绕过 SSH 路由, 一致性缺口成立**。这是 core 设计内的隔离边界(worker-thread = containment only), 插件层无法拦截。
 
 **Q4 cwd 语义 —— 宿主进程 cwd, 与工具层分叉**:
 - CodeRunRequest 无 cwd 字段(core dsh-code-runtime/lib/types/types.d.ts:70-86 仅 program/bindings/signal); worker 继承宿主进程 cwd。
-- **实测**: code runtime 内 process.cwd() = C:\Users\Administrator(本 harness 宿主启动目录) ≠ 会话工作区(D:\Code\AI\ddsh); 相对路径按宿主 cwd 解析(agents.md 在 worker 内 not found); child_process 子进程同 cwd。
+- **实测**: code runtime 内 process.cwd() = <home>(本 harness 宿主启动目录) ≠ 会话工作区(<repo>); 相对路径按宿主 cwd 解析(agents.md 在 worker 内 not found); child_process 子进程同 cwd。
 - 工具层对照: bash 的 cwd 来自 exec.agent?.session.header.cwd(core dsh-tool-bash/lib/index.js:173-178); 远端占位 cwd(remoteRoot()/<hostId>/<base64url>, 插件 src/router.js:12-16, 46-50)在 code runtime 里只是普通字符串。→ 占位 cwd 下 run_code 内相对路径与 child_process 全部按**本地宿主**解析/执行, 与工具层(远端)语义分叉; 模型若在程序内用相对路径(node:fs)会落在本地宿主目录而非远端。
 
 **Q5 支持矩阵与修复建议**:
@@ -662,7 +663,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 **1. 现状行为(代码事实, HEAD cdf9291)**
 
-- 远端分支**硬拒绝**: packages/dsh-ssh/tools.js bash execute 远端分支(route.kind === 'remote')在 args.run_in_background === true 时直接 throw: "[@aaravarr/dsh-ssh] run_in_background is not supported for remote workspaces yet (M5); run the command in the foreground"。**没有 nohup / 持久通道 / tmux 任何后台化机制; 不退化为前台; 直接报错**。这是 M5 待办 "后台任务(tool-jobs)需远端化" 的现状。
+- 远端分支**硬拒绝**: packages/dsh-ssh/tools.js bash execute 远端分支(route.kind === 'remote')在 args.run_in_background === true 时直接 throw: "[@dsh-ssh/dsh-ssh] run_in_background is not supported for remote workspaces yet (M5); run the command in the foreground"。**没有 nohup / 持久通道 / tmux 任何后台化机制; 不退化为前台; 直接报错**。这是 M5 待办 "后台任务(tool-jobs)需远端化" 的现状。
 - 广告不一致(UX 坑): bash 的 description(bashDescription, tools.js 行 82-85)与参数 schema(行 447, backgroundEnabled = config.enableRunInBackground ?? true 恒为 true)照抄官方广告 "Set run_in_background: true ... job_output / job_kill"; 模型在远端工作区会看到该参数被广告, 调入才抛错。
 - job_output / job_list / job_kill(官方 @deepseek-ai/dsh-tool-jobs)在 standard-ssh preset 中**保留**: packages/dsh-ssh/preset/agent.cordis.yml 行 79-80 仍有 tool-jobs 行(未被 tools.js 同名替换)。它们走 host 平面 ctx.jobs 注册表, 不按 cwd 路由 → 在远端工作区可用但不产生任何远端 job: job_list 恒空; job_output / job_kill 对远端任务报"找不到该 job"。
 - 远端前台通路本身正常: route.kind === 'remote' 时 conn.exec(cmd, { cwd: remoteCwd, timeoutMs }) 正常返回; timeoutMs 缺省 60s(REMOTE_EXEC_DEFAULT_TIMEOUT)。
@@ -675,7 +676,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 **3. 真机实测(ubuntu 203.0.113.10; 仅 /tmp/dsh-ssh-verify-jobs; 已清理; 脚本 .agents/tmp/verify-jobs*.mjs 已删)**
 
 - 层1 工具路由实测(最小 fake ctx 真实加载 tools.js apply, 真实 SshPool; 占位 cwd 经 router.mapRemoteToLocal 生成, routeByCwd 判定 remote 正确):
-  - T1: run_in_background:true + 远端 cwd → **抛错** "[@aaravarr/dsh-ssh] run_in_background is not supported for remote workspaces yet (M5); run the command in the foreground"。与代码一致, 实测确认真机即现状。
+  - T1: run_in_background:true + 远端 cwd → **抛错** "[@dsh-ssh/dsh-ssh] run_in_background is not supported for remote workspaces yet (M5); run the command in the foreground"。与代码一致, 实测确认真机即现状。
   - T2: 前台远端 exec → 正常 { kind:'foreground', exitCode:0 }。cwd 不存在时 buildRemoteCommand 的 "cd '<cwd>' && cmd" 使 cd 失败短路, 后续用 ; 串联的命令仍执行而整链 exitCode 变 1(既有行为, 与本审计相关度低)。
   - T3: 前台 + timeoutMs:2000 + "sleep 6" → { kind:'foreground', timedOut:true, exitCode:null }: timeout 语义正常。但超时(客户端 stream.close())后 2.7s 查远端 "sleep 6" **仍在运行** —— 与本地 executor "超时杀进程"语义不同(远端残留进程, 输出无人收)。
 - 层2 后台化机制可行性(ssh2 SshConn 直连实测, 三轮):
@@ -727,9 +728,9 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 **2. 六条最小验证(逐项证据)**
 
-1. **dump-config**: `node ...dsh/lib/bin.js --profile dsh-ssh-dev --dump-config` → EXIT=0, 组合树含 `- id: '@aaravarr/dsh-ssh'  name: '@aaravarr/dsh-ssh'` 行。
+1. **dump-config**: `node ...dsh/lib/bin.js --profile dsh-ssh-dev --dump-config` → EXIT=0, 组合树含 `- id: '@dsh-ssh/dsh-ssh'  name: '@dsh-ssh/dsh-ssh'` 行。
 2. **时序**: dsh-agent/README.zh.md 源码 —— `agent/created` 在 setup 之后、driver 启动之前同步发出(首次工具调用前); 实测 scripts/verify-agent-created.mjs 中 `agents.create(...)` 返回后阴影已在 agent 视图(早于任何 `execute`)。
-3. **遮蔽**: verify 脚本(真实 cordis 组合 dsh-base+dsh-ssh, 无 web-app)实测 —— 远端占位 cwd + standard preset 会话的 read/glob/grep 等 6 个 fs/search 工具带 ROUTED_TOOL_MARKER, 且 `read /etc/hostname` 返回 **vm-remote-ubuntu**(远端 Ubuntu, 非本地 Windows)——证明走 SSH 路由而非官方本地实现。
+3. **遮蔽**: verify 脚本(真实 cordis 组合 dsh-base+dsh-ssh, 无 web-app)实测 —— 远端占位 cwd + standard preset 会话的 read/glob/grep 等 6 个 fs/search 工具带 ROUTED_TOOL_MARKER, 且 `read /etc/hostname` 返回 **<remote-host>**(远端 Ubuntu, 非本地 Windows)——证明走 SSH 路由而非官方本地实现。
 4. **委托**: test/tools-local.test.js(本地分支 args/exec 按身份原样传递官方工具, 逐字节一致); 本地 cwd 会话实测阴影为空(无 marker → 官方工具)。硬约束 4 成立。
 5. **子 agent**: 钩子监听器注册在 host 根 ctx(无 scope tag)→ dsh-scope `scopeTarget` 对未 tag 监听器返回 true → 接收**所有** agent(根 + 子); 子 agent 由 dsh-subagent `composeFrom` 走同一 dsh-agent-loop `createScope(loopCtx, this)` + `agent/created` 路径(调研笔记 Q3)。源码证据, 真机子 agent UI 确认归用户。
 6. **code/minimal preset 不受影响**: 策略 (a) 仅遮蔽「已存在」名字 —— 实测 standard preset 在 Windows 上 `bash` 因 `tool-bash disabled: !!js process.platform === 'win32'` 不在视图, **未被补注册**(verify 输出「bash(Windows 禁用)未被补注册」); 单测 selectShadowNames 覆盖「minimal 只暴露 bash → 只遮蔽 bash」「get 抛错 → 返回空不抛」。code preset 同样只遮蔽其已注册的名字。
@@ -850,7 +851,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - 其余表单字段(name/host/port/user/password/keyPath)已用官方 primitives.Input, 无需处理。
 ### A.25 调研: 远端工作区会话下 skill / MCP / 其他宿主侧工具的行为(2026-08-19, 子代理, 纯调研不改代码)
 > 背景: dsh-ssh 方案⑤(agent/created + scope 遮蔽)把 7 个同名工具(bash/read/write/edit/read_image/glob/grep)按会话 cwd 路由到远端。用户问: skill、MCP 在远端会话里引用的本地还是远程? 本节给结论+源码行号。仅调研, 不实施。
-> 约定: core = D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh(node_modules 下 packages)。编号说明: A.22/A.24 可能被并发占用, 按 §6.4 顺移为 A.25。
+> 约定: core = <dsh-checkout>(node_modules 下 packages)。编号说明: A.22/A.24 可能被并发占用, 按 §6.4 顺移为 A.25。
 
 #### 0. 一句话结论
 **① ⑤遮蔽只覆盖 7 个同名路由工具, skill 与 mcp__* 不在名单, 绝不被遮蔽、始终可见。② skill 目录发现/读取走宿主 ctx.fs(host 全局, 未被⑤替换)+ 本地绝对路径 → 远端会话技能目录/SKILL.md/脚本文本一律本地读; skill scripts/ 若被远端 bash 执行会因本地路径不在远端而失败, 若被 read 读则本地委托官方、读得内容但脚本不在远端。③ MCP 服务器(stdio 本地子进程 / HTTP)在自己环境执行, 与 cwd 路由完全解耦 → 远端会话 MCP 工具仍在本地 host(或 HTTP server 所在处)执行。④ 其余宿主工具(todo/ask_user/web_search/subagent/goal/jobs)与 fs 无关 → 远端/本地一致。总结: ⑤只影响被遮蔽的 7 个工具, skill/MCP/其它全部在本地执行。**
@@ -866,7 +867,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - 无任何「skill 脚本执行器」: skill 工具只返回 {name, provider, resourceBase, content}(dsh-tool-skill L119-142); resourceBase={kind:'directory',path:locator.directory}(dsh-skill-filesystem L126 = 技能目录本地绝对路径), content=SKILL.md 正文; 正文(dsh-skill renderSkillContent/renderResourceHint)只让模型对 base directory 解析相对路径按需加载。故 scripts/ 只能由模型自己用 bash/read 加载。
 - 远端会话行为(⑤遮蔽后模型面对的 bash/read 都是路由工具、按 cwd 判定):
   - SKILL.md 指令文本: 经 ctx.skills.get→ctx.fs 本地读 → 本地读 OK(注入上下文, 不落远端)。
-  - 模型用 bash 跑技能脚本(bash <skilldir>/scripts/x.sh): cwd 远端占位 → 远端分支 → 远端机器无 C:\Users\...\.agents\skills\x\scripts\x.sh → 失败(找不到)。
+  - 模型用 bash 跑技能脚本(bash <skilldir>/scripts/x.sh): cwd 远端占位 → 远端分支 → 远端机器无 <home>/.../.agents/skills/x/scripts/x.sh → 失败(找不到)。
   - 模型用 read 读技能脚本: 传本地绝对路径(不在 ~/.dsh/remote/... 下)→ routeByCwd 判 local → delegateLocal → ctx.tools.get('read')(无 scope→host 全局官方)→ 本地读成功, 但脚本不在远端(只读本地副本)。
   - 技能目录都在本地 ~/.agents/skills 或项目根, 不落占位路径 → 一律本地。
 
@@ -909,7 +910,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - C(能力面提示注入): agent/created 钩子向 agent 注入「环境声明」(本地/远端能力面 + 资源基座), 纯附加不遮蔽。
 **结论**: ⑤本身无缺口(只遮蔽 7 名), 无需改代码; skill 与 MCP 在远端会话均引用本地/自身资源, 属设计如此, 建议「A 文档化 + 可选 C」收口, 不引入工具层改动。
 ### A.24 实施: UI/UX 设计规范四批(§6 A/B/C/D)+ 默认工作区方案 C(2026-08-19, 子代理, 只改 client.js 样式/文案/交互, 未重启服务)
-> ⚠️ 依据 .agents/notes/design/ui-ux-spec.md §6 四批清单执行, 方案 C 完整版(用户拍板)。A.22 被并发占用已顺移过; 本节编号 A.24(A.23 之后、A.25 之前, 当前空闲; 若并发占用则按 §6.4 顺移)。只改 packages/dsh-ssh/client.js(plain JS 无构建), 未碰 core / tools.js / src/(另子代理在改), 未重启 3090。
+> ⚠️ 依据 .agents/notes/design/2026-08-20-ui-ux-spec.md §6 四批清单执行, 方案 C 完整版(用户拍板)。A.22 被并发占用已顺移过; 本节编号 A.24(A.23 之后、A.25 之前, 当前空闲; 若并发占用则按 §6.4 顺移)。只改 packages/dsh-ssh/client.js(plain JS 无构建), 未碰 core / tools.js / src/(另子代理在改), 未重启 3090。
 
 **1. 用户三项决策落实证据**
 - **决策1 方案 C 完整版**:
@@ -973,7 +974,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - 真实 SshPool+SshConn 跑 2 个后台任务: Job A sleep 4 写文件 exit3; Job B sleep 20。readOutput 增量读到 START-A/B-START; cancel B → done={status:killed}, pid kill -0 探活 DEAD, ps -eo pid,ppid,pgid,args|grep 无残留(NONE); 等 A done → {status:completed, detail:'exit code: 3'}, 输出文件 DONE-A 落盘; 清理后 /tmp/dsh-ssh-verify-jobs2 删除且全局进程扫描 NONE。脚本保留: test/live-jobs.mjs(可复跑, 非 *.test.js 不进套件)。
 
 **3090 服务重启(dsh-ssh-dev profile, 供真机验证)**
-- 停旧 PID 17692 → Start-Process node.exe dsh/lib/bin.js --profile dsh-ssh-dev --port 3090, DSH_HOME=C:\Users\Administrator\.dsh, WorkingDirectory=$DSH_HOME/profiles/dsh-ssh-dev, 日志覆盖 web.log/web.err.log, 新 PID 63188 写 web.pid; 验证 HTTP 200 + web.err.log 空(0 行)+ web.log 一行 "dsh web: http://127.0.0.1:3090"。
+- 停旧 PID 17692 → Start-Process node.exe dsh/lib/bin.js --profile dsh-ssh-dev --port 3090, DSH_HOME=<home>/.dsh, WorkingDirectory=$DSH_HOME/profiles/dsh-ssh-dev, 日志覆盖 web.log/web.err.log, 新 PID 63188 写 web.pid; 验证 HTTP 200 + web.err.log 空(0 行)+ web.log 一行 "dsh web: http://127.0.0.1:3090"。
 
 **遗留/注意**
 - jobs.start 的 owner 仅在 exec.agent 存在时传入; 后台日志/status 文件放 /tmp/dsh-ssh-jobs-<hostId>(远端该目录需可写)。
@@ -1043,7 +1044,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 > 症状: 3090 真机, 远端工作区会话 + standard preset + Windows 宿主, 模型调 bash run_in_background:true → 报错 `background jobs unavailable: no job controller serves this agent (load @deepseek-ai/dsh-tool-jobs in its composition)`。任务书初步诊断(待证实): 疑 Windows 上 tool-bash 被 platform 禁用 → job controller 无人注册。本节结论:**该假设证伪**; 真根因是 web 组合下 base tool-jobs 被禁用 + Cordis Service 按 scope 分层实例化导致 agent scope 的 jobs 实例无 controller。修复=方案⑤钩子为 agent scope 补记 controller, core 零修改。
 
-**1. controller 机制结论(core 源码行号, 只读参考 D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai)**
+**1. controller 机制结论(core 源码行号, 只读参考 <dsh-checkout>\node_modules\@deepseek-ai)**
 
 - 抛错点: **dsh-jobs-local/lib/index.js L132** `start()` 首行 `if (!this.servesOwner(spec.owner)) throw ... no job controller serves this agent`。
 - **servesOwner 判定(L139-144)**: 全局层非空即 true；否则沿 `scopeOf(owner.ctx)` 的 scope 链 `chainLayers` 找非空 controller 层。
@@ -1058,7 +1059,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 **3. 修复(方案⑤ agent scope 注册, core 零修改)**
 
-- **packages/dsh-ssh/index.js**: 新增 `attachAgentJobsController(agent, name='@aaravarr/dsh-ssh')`: 用 `agent.ctx.get('jobs').attachController(name)`(官方 API)在 agent 自身 scope 补记 controller, 返回 `{jobs, disposer}` 或 null(静默)。
+- **packages/dsh-ssh/index.js**: 新增 `attachAgentJobsController(agent, name='@dsh-ssh/dsh-ssh')`: 用 `agent.ctx.get('jobs').attachController(name)`(官方 API)在 agent 自身 scope 补记 controller, 返回 `{jobs, disposer}` 或 null(静默)。
 - installToolRoutingHook handler 在 `route.kind !== 'remote'` 之后、遮蔽注册之前调用它(顺带 controller; 结果仅日志/断言, 绝不外抛 — agent/created 同步抛错会 veto agent 发布)。
 - 原理: 遮蔽 bash 与补记 controller 走**同一 `agent.ctx.get('jobs')` 实例**, `servesOwner(agent)` 沿 agent scope 链即命中 → 后台任务可用。纯附加: 不改 core; 不改本地会话(local cwd 仍先行 return); preset 已挂 tool-jobs 时只是多一个匿名 token, 无副作用。
 - **未改**: tools.js 的 startRemoteBackground 本体、src/remote-jobs.js、core、client.js。
@@ -1100,7 +1101,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 - node --check src/placeholder.js / src/remote.js / test/m4-placeholder.test.js / test/remote.test.js → 全部 EXIT 0。
 - node --test test/*.test.js(packages/dsh-ssh)→ tests **246** / pass **236** / fail **10**(A.28 后 241/231/10 上净增 5 过, 全为新增; fail 10 为 Windows path.sep 既有问题, 与本改动无关, 不劣化)。
-- 引用源（以上行号的 core 只读路径）: D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\dsh-client-ui-tool / dsh-client-ui-primitives / dsh-tools / dsh-host-apiproxy。
+- 引用源（以上行号的 core 只读路径）: <dsh-checkout>\node_modules\@deepseek-ai\dsh-client-ui-tool / dsh-client-ui-primitives / dsh-tools / dsh-host-apiproxy。
 
 **5. 红线确认 / 遗留项**
 
@@ -1133,7 +1134,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 - 单测: remote-jobs.test.js **13/13**; tools-remote.test.js + jobs-controller.test.js **23/23**; 全量 `node --test test/*.test.js`(packages/dsh-ssh)→ tests **246** / pass **236** / fail **10**(fail 10 = Windows path.sep 既有问题, 与本次改动无关; 与 A.29 记录基线一致, 不劣化)。
 - **真机端到端(关键, 前次漏了这层)**: 临时 driver 用**真实 LocalJobRegistry + 真实 SSH(203.0.113.10/ubuntu)** 走完整 start→job_output/job_list→snapshotJsonValue + JSON.parse(JSON.stringify) 往返:
   `A read#1 text type=string="START-A\n"`; `job_output(A running) lossless OK`; `job_list(2 running) lossless OK`; `B wait=killed detail=signal: TERM`; `A wait=completed detail=exit code: 3`; `a.out="DONE-A"`; `job_output(A completed) lossless OK`; **RESULT: PASS**。远端 /tmp/dsh-ssh-e2e-* 已清理。
-- 服务: 重启 3090(dsh-ssh-dev, 停旧 6920 → 新 **PID 34084**, 插件 profile 下 @aaravarr/dsh-ssh 是到 D:\Code\AI\ddsh\packages\dsh-ssh 的 Junction, 改动自动生效); HTTP 200(http://127.0.0.1:3090/), web.err.log **空**, web.pid=34084。
+- 服务: 重启 3090(dsh-ssh-dev, 停旧 6920 → 新 **PID 34084**, 插件 profile 下 @dsh-ssh/dsh-ssh 是到 <repo>/packages/dsh-ssh 的 Junction, 改动自动生效); HTTP 200(http://127.0.0.1:3090/), web.err.log **空**, web.pid=34084。
 
 **红线**: core 零修改; 未碰 PID 9604(dsh web); tools.js 仅有 startRemoteBackground 区域(本改未动); 远端仅 /tmp/dsh-ssh-jobs-* 可写且已清理。
 
@@ -1141,7 +1142,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 > 目标: 定位并审阅 3090/dsh-ssh-dev 会话 f1f0e1b2-42a3-4204-adea-948f99f774e6(用户观察到的 web 会话 ID)。
 
-**一、前端会话 ID ↔ host 存储映射机制(核心, 含行号; core 只读 D:\Scoop\persist\nodejs\bin\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\)**
+**一、前端会话 ID ↔ host 存储映射机制(核心, 含行号; core 只读 <dsh-checkout>\node_modules\@deepseek-ai\)**
 
 - **前端会话 ID == host SessionId == 落盘目录名, 无任何客户端缩短/映射**: dsh-host-apiproxy/lib/index.js **L2419** listVisibleSessionSummaries(直接透传 host session.id); dsh-client-connection/lib/client.js **L6280** 把 session.list 走 unary 直通。
 - **落盘路径** = `<sessions-root>/<encodeSegment(cwd)>/<encodeSegment(sessionId)>/session.jsonl.zstd`; encodeSegment 对 [A-Za-z0-9._-] 原样保留、其余转 `~XXXX`(dsh-session-persistence-jsonl/lib/index.js **L83**(encodeSegment) / **L145**(sessionDir) / **L156**(logPath) / **L118**(projectKey))。**目录名 = sessionId 原样**, 是否带 `session-` 前缀取决于创建方式: host create/fork 生成 `session-<uuid>`(apiproxy index.js **L2519** create / **L2731** fork); 客户端 session.create 自定义 id 或**子代理会话**为裸 uuid(实测本审计子代理 id=d41cecf1-... 落盘即裸 uuid 目录, 对应当前正在 `--D-Code-AI-ddsh--/d41cecf1-.../session.jsonl.zstd`)。
@@ -1153,7 +1154,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 
 - `POST /api/session.list`(3090)全部 sessionId: **不含** f1f0e1b2。
 - `POST /api/session.history`(3090)对 `session-f1f0e1b2-...` 与裸 `f1f0e1b2-...` 均返回 **session-not-found**。
-- 递归搜 C:\Users\Administrator\.dsh 下 `*f1f0e1b2*`: **0 命中**(DSH_HOME 唯一、sessions 根唯一; node_modules/profiles 已排除)。
+- 递归搜 <home>/.dsh 下 `*f1f0e1b2*`: **0 命中**(DSH_HOME 唯一、sessions 根唯一; node_modules/profiles 已排除)。
 - 因 A.30 已将 3090 服务重启(旧 PID 6920 → 新 **PID 34084**, 见 A.30 L1527), **重启前的纯内存/UI 态会话(未落盘)不复存在** —— f1f0e1b2 极可能就是这一类(另一 profile/实例 web 展示 id、未落盘的子代理/内存会话、或已被清理), 而非可落盘的 host session。
 
 **三、审阅发现(目标会话内容不可得 → 转向机制核验)**
@@ -1172,7 +1173,7 @@ node scripts/install-preset.mjs --home C:\Users\Administrator\.dsh
 **1. 结论(一句话根因 + 现状判定)**
 
 - **当前仓库代码已满足全部验收标准, 无需再改生产代码**。任务书描述的"假完成/读不到输出"对应 **A.22 之前的旧设计**(done 错误依赖 spawn exec 通道 close 事件当成进程退出 → 通道在 echo $! 后即关 → 误报 completed)与 **A.30 之前的旧 readOutput**(async SFTP 读返回 Promise 使 job_output 报非 lossless JSON / 读不到输出)。这两坑已在 A.22(A.17 方案1(b)+ 红线① setsid/cd 内嵌 + 红线② kill 覆盖进程树)+ A.30(同步 buffered 游标 readOutput + run() 三键契约)修复; 本次用**真实 LocalJobRegistry + 真实 SSH** 端到端复核证实当前代码正确。
-- 若真机仍见 3.8s 假完成, 是**运行中的服务进程早于修复加载了旧模块**(Node 不热更); dsh-ssh-dev profile 下 @aaravarr/dsh-ssh 是指向本仓库的 Junction, 重启该服务后加载的就是当前代码。
+- 若真机仍见 3.8s 假完成, 是**运行中的服务进程早于修复加载了旧模块**(Node 不热更); dsh-ssh-dev profile 下 @dsh-ssh/dsh-ssh 是指向本仓库的 Junction, 重启该服务后加载的就是当前代码。
 
 **2. 复核证据(当前代码, 出处 packages/dsh-ssh/src/remote-jobs.js 行号)**
 
@@ -1401,28 +1402,28 @@ startRemoteBackground(packages/dsh-ssh/tools.js L371-395)用 defaultRemoteJobDir
 2. packages/dsh-ssh/index.js 中 preset 自动同步逻辑全删: PRESET_ID/PRESET_FILES 常量、installBundledPreset()(含 autoInstallPreset 守卫与 apply() 内调用块)、随包 fileURLToPath/mkdir/readFile/writeFile 导入(仅剩 rm 供 placeholder cleanup); apply() 日志去掉 "preset auto-sync"。
 3. packages/dsh-ssh/scripts/install-preset.mjs 删除。
 4. packages/preset-standard-ssh/ 整个包删除(上游快照/build/validate/install-preset)。
-5. packages/@aaravarr/dsh-ssh/ 整个删除 —— 已先确认其内容仅为 preset 副本(与原 dsh-ssh/preset 两文件字节数一致: agent.cordis.yml 14200 / preset.yml 214)。
+5. packages/旧 scope 包/ 整个删除 —— 已先确认其内容仅为 preset 副本(与原 dsh-ssh/preset 两文件字节数一致: agent.cordis.yml 14200 / preset.yml 214)。
 6. packages/dsh-ssh/test/preset-auto-install.test.js 删除; test/tools-sandbox.test.js 中 "preset 挂载 / standard-ssh preset" 措辞改为 "本地委托模式(remoteRouting=false)"。
 7. packages/dsh-ssh/tools.js 的 apply()(原"preset 挂载路径 / standard-ssh 回退")经读码判断: 生产链(index.js)已不调用它(只用 registerRoutedTools 走 agent/created 钩子), 但 apply() 仍被 6 个测试/实机脚本 import 作为"本地委托模式(remoteRouting=false)"的注册助手(tools-local/remote/search/sandbox.test.js、functional-live-test.mjs、sandbox-live-verify.mjs) —— 属"还承担其它用途", 故保留 apply(), 注释改为"本地委托模式注册助手, 随包 preset 已删, 生产路由统一走 index.js 钩子"。未盲删。
 8. packages/dsh-ssh/package.json 的 files 白名单去掉 "preset" 条目(留 scripts)。
 9. 文档: agents.md(§3 改工具路由/方案⑤ 叙述 + 历史一段; §5 树去 preset/ 行; §9 删 preset 同步/验证命令; baseline 272→286)、packages/dsh-ssh/README.md(最小删除清理: 卸载说明去 preset、测试覆盖列表去 preset-auto-install、脚本清单删 install-preset 行; baseline 272→286, 余下待整体重写)。根 README.md 仍有 standard-ssh/install-preset/autoInstallPreset 引用 —— 任务书 §9 未列入处理范围(preset 相关文档待整体重写), 未改动, 列入残留清单。
-10. 不碰磁盘 C:/Users/Administrator/.dsh/.agent-presets/standard-ssh 已同步副本(主代理另行清理)。
+10. 不碰磁盘 <home>/.dsh/.agent-presets/standard-ssh 已同步副本(主代理另行清理)。
 
 **验证**: node --test test/*.test.js → 286 tests, pass 286, fail 0(原 287 去掉 preset-auto-install 1 例); node packages/dsh-ssh/scripts/client-selfcheck.mjs → OK(exit 0)。残留 grep standard-ssh|autoInstallPreset|install-preset 仅剩: agents.md §3 历史叙述(刻意保留一句)、根 README.md(L17/39/40/46/87, 未纳入任务范围)、及本笔记历史条目(A.4/A.8/A.19/A.26 等, 属历史事实不改)。core 零修改; 方案⑤ 路由能力无回退(e2e/路由测试保持绿)。
 
-**理由**: 方案⑤(agent/created 钩子按会话 cwd 遮蔽七同名工具, 见 A.18/A.27/A.40)与 preset 无关, 官方 standard preset 即可; standard-ssh preset(含 install-preset 自动同步 / 产物包 / @aaravarr 副本)成为死代码与维护负担, 全删。
+**理由**: 方案⑤(agent/created 钩子按会话 cwd 遮蔽七同名工具, 见 A.18/A.27/A.40)与 preset 无关, 官方 standard preset 即可; standard-ssh preset(含 install-preset 自动同步 / 产物包 / 旧 scope 副本)成为死代码与维护负担, 全删。
 
 ---
 
-### A.41 改名: 项目 dssh → dsh-ssh + npm scope @aaravarr → @dsh-ssh (2026-08-20, 补记)
+### A.41 改名: 项目 dssh → dsh-ssh + npm scope 旧 scope → @dsh-ssh (2026-08-20, 补记)
 
 > 编号说明: 本条为补记(改名子代理未回写), 时序上先于 A.42; 按 §6.4 保留 A.42 编号不动。
 
-**背景**: 用户决定项目完全改名 dsh-ssh（GitHub org/repo 已改 dsh-ssh/dsh-ssh）; npm scope @aaravarr → @dsh-ssh, 包名 @dsh-ssh/dsh-ssh。
+**背景**: 用户决定项目完全改名 dsh-ssh（GitHub org/repo 已改 dsh-ssh/dsh-ssh）; npm scope 旧 scope → @dsh-ssh, 包名 @dsh-ssh/dsh-ssh。
 
 **改动(两批)**:
 1. dssh → dsh-ssh: 代码标识(dsh-ssh:capability-surface)、settings 命名空间 dssh-hosts → **dsh-ssh-hosts 带迁移**(src/settings.js LEGACY_HOSTS_NAMESPACE 只读回退; saveHost/deleteHost 首次编辑整体迁入新命名空间防孤儿化; test/settings-migration.test.js 7 例)、环境变量 DSSH_TEST_*/DSSH_REMOTE_ROOT/DSSH_VERIFY_SKIP_SSH → DSH_SSH_TEST_* 等、远端默认目录 /tmp/dssh-* → /tmp/dsh-ssh-*、全部文档/笔记(笔记由主代理逐模式 replace_all, L493 历史命令记录保留原样)。
-2. @aaravarr → @dsh-ssh: package.json name/repository.url、cordis.patch.yml bundle id、代码日志前缀、根 package.json(name=dsh-ssh, plugin:add 修 profile 名与路径)、LICENSE 版权、删除重复的旧 .github/workflows/publish.yml(保留带测试门禁的 release.yml)。
+2. 旧 scope → @dsh-ssh: package.json name/repository.url、cordis.patch.yml bundle id、代码日志前缀、根 package.json(name=dsh-ssh, plugin:add 修 profile 名与路径)、LICENSE 版权、删除重复的旧 .github/workflows/publish.yml(保留带测试门禁的 release.yml)。
 
 **验证**: 单测 287/287 fail=0(含迁移 7 例); client-selfcheck OK(id=@dsh-ssh/dsh-ssh)。
 
@@ -1437,15 +1438,15 @@ startRemoteBackground(packages/dsh-ssh/tools.js L371-395)用 defaultRemoteJobDir
 | 硬编码旧值 | env 出口 | 默认值(当前开发机仍可用) |
 |---|---|---|
 | 3090 端口/base URL(scripts/e2e-web-3090.mjs 的 base 与占位 cwd) | DSH_SSH_TEST_E2E_BASE(兼容旧 E2E_BASE) | http://127.0.0.1:3090 |
-| 占位根 C:\Users\Administrator\.dsh\remote | DSH_SSH_DSH_HOME 推导(placeholderRoot = dshHome/remote) | <os.homedir()>/.dsh/remote |
-| DSH core 目录 D:/Scoop/persist/nodejs/bin/node_modules/@deepseek-ai/dsh(两 verify 脚本的 CORE) | DSH_SSH_DSH_NODE_MODULES(resolveDshNodeModules 探测: env → 常见安装点 → npm 全局 prefix) | 探测命中当前机器路径 |
-| DSH_HOME C:\Users\Administrator\.dsh(两 verify 脚本 process.env.DSH_HOME) | DSH_SSH_DSH_HOME(resolveDshHome, 默认 os.homedir()/.dsh) | <os.homedir()>/.dsh |
+| 占位根 <home>/.dsh/remote | DSH_SSH_DSH_HOME 推导(placeholderRoot = dshHome/remote) | <os.homedir()>/.dsh/remote |
+| DSH core 目录 <dsh-checkout>(两 verify 脚本的 CORE) | DSH_SSH_DSH_NODE_MODULES(resolveDshNodeModules 探测: env → 常见安装点 → npm 全局 prefix) | 探测命中当前机器路径 |
+| DSH_HOME <home>/.dsh(两 verify 脚本 process.env.DSH_HOME) | DSH_SSH_DSH_HOME(resolveDshHome, 默认 os.homedir()/.dsh) | <os.homedir()>/.dsh |
 | profile 名 dsh-ssh-dev(两 verify 脚本 loadProfile) | DSH_SSH_TEST_PROFILE | dsh-ssh-dev |
-| 仓库绝对路径 file:///D:/Code/AI/ddsh/packages/dsh-ssh/{tools,src/router}.js(两 verify 脚本 import) | 改为 new URL('../xxx', import.meta.url) 相对到仓库内 | 仓库内相对解析 |
+| 仓库绝对路径 file://<repo>/packages/dsh-ssh/{tools,src/router}.js(两 verify 脚本 import) | 改为 new URL('../xxx', import.meta.url) 相对到仓库内 | 仓库内相对解析 |
 
 **其它脚本**: e2e-web-3090 占位 cwd 改为 `path.join(liveConfig.dshHome,'remote',liveConfig.hostId, Buffer.from(REMOTE,'utf8').toString('base64url'))` 动态计算, 不再写死用户/主机; 各 live/verify/bench 脚本头部补英文 PREREQ + 换机器说明(export DSH_SSH_TEST_* / DSH_SSH_DSH_*)。
 
-**单测本地路径**: test/*.test.js 无机器绑定硬编码; 现存 /Users/haowu/project 等是路由逻辑的可移植 POSIX 绝对路径 fixture(远端/本地路由判定需要绝对路径), 非本机绑定, 不改。
+**单测本地路径**: test/*.test.js 无机器绑定硬编码; 现存 <home>/project 等是路由逻辑的可移植 POSIX 绝对路径 fixture(远端/本地路由判定需要绝对路径), 非本机绑定, 不改。
 
 **验证**: node --check 全改动脚本通过; node --test test/*.test.js = 286 pass / 0 fail(基线不回退); scripts/live-smoke.mjs 实跑 LIVE-SMOKE-OK(仅读远端 /tmp, 无残留需清理)。出处: packages/dsh-ssh/{test/live-config.mjs, scripts/*.mjs}。
 

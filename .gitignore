@@ -1,7 +1,38 @@
+# deps & build
 node_modules/
 dist/
 out/
-*.log
-*.tsbuildinfo
-.DS_Store
 .pnpm-store/
+*.tsbuildinfo
+
+# logs & tmp
+*.log
+npm-debug.log*
+pnpm-debug.log*
+tmp/
+temp/
+.turbo/
+.cache/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+id_rsa
+id_ed25519
+*.priv
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# agents scratch
+.agents/tmp/

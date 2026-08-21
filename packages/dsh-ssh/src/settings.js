@@ -26,7 +26,7 @@ export const HostConfigSchema = z.object({
   auth: z
     .union([
       z.object({ type: z.const('key'), privateKeyPath: z.string().description('私钥路径; 缺省走 ssh-agent') }),
-      z.object({ type: z.const('password'), password: z.string().role('secret').description('口令; M2a 明文存 settings.yaml, 后续接 secret 存储(F3)') }),
+      z.object({ type: z.const('password'), password: z.string().role('secret').description('口令; write-only(保存后不回传, 留空沿用已保存值); 当前以明文落 settings.yaml, 属已知待改进项') }),
     ])
     .default({ type: 'key' })
     .description('认证方式'),
@@ -40,7 +40,7 @@ export const HostConfigSchema = z.object({
 // write-only field left blank = keep as-is); deletion uses settings.mutate's
 // unset ['hosts', <id>] (mutate paths must be string arrays; numeric indexes are rejected).
 export const HostsSettingsSchema = z.object({
-  hosts: z.dict(HostConfigSchema).default({}).description('SSH 主机配置(id → HostConfig, F1 CRUD 的持久化载体)'),
+  hosts: z.dict(HostConfigSchema).default({}).description('SSH 主机配置(id → HostConfig 的持久化载体)'),
 });
 
 /** Extract the hosts dict from a settings document (tolerant of undefined). */

@@ -20,6 +20,19 @@
 >
 > 完全基于 DSH 面向第三方插件的官方公开契约构建 —— 纯附加、不改 DSH core 一行、远端零安装（只需要一个普通 `sshd`）。卸载后 DSH 恢复原样；本地工作区行为与之前逐字节一致。
 
+## 目录
+
+- [功能](#功能)
+- [安装](#安装)
+- [快速上手（30 秒）](#快速上手30-秒)
+- [什么在哪侧执行](#什么在哪侧执行)
+- [兼容性](#兼容性)
+- [已知限制](#已知限制)
+- [故障排查](#故障排查)
+- [FAQ](#faq)
+- [开发](#开发)
+- [License](#license)
+
 ## 功能
 
 - **设置页 SSH 主机**：直接在 DSH 设置页增 / 删 / 改主机（host / port / user / 密钥或口令），一键测试连接。
@@ -61,10 +74,12 @@ dsh plugin --profile web add @dsh-ssh/dsh-ssh
 | 维度 | 状态 |
 |---|---|
 | 远端系统 | Ubuntu ✅ · macOS ✅（真机实测） |
-| 认证 | 密钥 ✅ |
+| 认证 | 密钥 ✅ · 口令 ✅ |
 | 远端依赖 | 仅需普通 `sshd`，无需 agent / 服务 / 内核模块 |
 | Windows 远端 | 不支持（仅 Linux / macOS） |
 | Preset | 任意 preset 均可，含 standard；与 preset 无关 |
+
+> **版本要求**：Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies（`@deepseek-ai/cordis@^4.0.1`、`@deepseek-ai/dsh-*@^0.1.0-rc.6`、`@deepseek-ai/schemastery@^3.18.1`，详见 `packages/dsh-ssh/package.json`）
 
 ## 已知限制
 
@@ -72,6 +87,15 @@ dsh plugin --profile web add @dsh-ssh/dsh-ssh
 - 远端 `grep` 基于 GNU grep，忽略规则与 `rg` 略有差异。
 - 远端禁用 SFTP 时，文件操作自动降级为 `exec` + base64（可用但更慢）。
 - 不支持 Windows 远端。
+
+## 故障排查
+
+- **连不上主机 / 测试连接失败**：检查 host / port / user 是否正确、22 端口是否放行、远端 `sshd` 是否运行、认证（密钥路径/口令）是否有效；设置页「测试连接」会执行真实握手 + `echo`，错误信息含 hostId 与远端输出，便于定位。
+- **指纹不匹配 / TOFU 校验失败**：首次连接会弹窗显示主机指纹（TOFU），确认后写入 `known_hosts`；若提示 `host key changed` 或指纹不匹配，说明远端重装或存在中间人风险，请核实后删除对应 `known_hosts` 条目或重新信任。
+- **私钥权限错误（UNPROTECTED PRIVATE KEY）**：OpenSSH 要求私钥权限为 `600`/`400`，组/其他用户不可读写，否则直接拒绝；请检查文件权限与路径（避免含空格或中文），确保 DSH 能读取。
+- **SFTP 被禁时自动降级为 exec + base64（变慢）**：远端若禁用 SFTP，文件操作仍可用但降级为 `exec` 通道 base64 传输（ExecFs），大文件/批量操作会明显变慢，属预期降级；如需恢复速度请在远端 `sshd_config` 启用 SFTP 子系统。
+- **占位目录说明（`~/.dsh/remote/<hostId>/...`）**：远端工作区在本地仅为占位目录（普通 workspace 记录，`workspaceRegistry` 会 `realpath` 校验），不含业务数据但必须真实存在且不能为符号链接；请勿手动删除或移动，需切换请走 DSH 工作区管理。
+- **如何收集日志**：工具失败会返回带 hostId、远端命令原文、退出码与输出尾部的明确错误；配合 `~/.dsh/settings.yaml` 中 `dsh-ssh-hosts` 配置、DSH 控制台日志与远端 `sshd` 日志（`/var/log/auth.log` 或 `journalctl -u sshd`）可快速定位，提 issue 时请脱敏后附上。
 
 ## FAQ
 
@@ -95,7 +119,9 @@ DSH 完全复原，不留痕迹。
 
 ## 开发
 
-本仓库是 pnpm workspace；面向开发者的文档在 `packages/dsh-ssh/`。包结构、测试与真机验证脚本见 [packages/dsh-ssh/CONTRIBUTING.md](./packages/dsh-ssh/CONTRIBUTING.md)。
+本仓库是 pnpm workspace；面向开发者的文档在根 [CONTRIBUTING.md](./CONTRIBUTING.md)。包结构、测试与真机验证脚本见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+> **导航**：Agent 入口见 [AGENTS.md](./AGENTS.md) · 开发者手册见 [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## License
 

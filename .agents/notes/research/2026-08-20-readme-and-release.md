@@ -1,6 +1,6 @@
 # README 写法 + npm 发布工作流(发布调研)
 
-> 发布阶段前置调研, 供 README 编写与 .github/workflows/release.yml 设计直接采用。日期: 2025-08-16。外部事实均注明出处 URL; 给 dsh-ssh 的建议基于本项目硬约束(§2)与既有决策 D7(plain JS 无构建)。
+> 发布阶段前置调研, 供 README 编写与 .github/workflows/release.yml 设计直接采用。日期: 2026-08-16。外部事实均注明出处 URL; 给 dsh-ssh 的建议基于本项目硬约束(§2)与既有决策 D7(plain JS 无构建)。
 
 ## 1. README 结构设计要点
 
@@ -53,8 +53,8 @@
 3. **slogan + 卖点 blockquote**: 如 "> 把另一台机器的目录变成 DSH 工作区——bash/文件/glob/grep 全部在远端执行, 远端零安装。" 紧跟一行: "**100% 纯附加: 不修改、不注入 DSH core, 全部走官方公共契约(agent/created 路由遮蔽 + bundle patch + settings 槽 + Typert), `dsh plugin remove` 卸载即逐字节复原。**"
 4. **截图区**(设置页主机配置 + 工作区切换/远端执行效果; 提交到 docs/, width 720; 真机验证通过后补, 预留位置)。
 5. **架构/契约小节**(推荐单独 "How it works"): 本地路径→宿主 ctx.shell/ctx.fs 原样; 远端路径→SSH(exec+SFTP); 列出用到的官方契约清单(agent/created 路由遮蔽、dsh.bundle patch、settings 命名空间、directoryFlow 槽、Typert RemoteService)。措辞强调"卸载即复原、升级自适应(core 零改动)"。
-6. **Features**(加粗 bullet): 多主机配置、一键切换运行机器、六工具远端执行、known_hosts 校验、连接池复用、远端零安装。
-7. **真实数据区(预留表格)**: 命令 RTT(本地 vs 远端实测)、SFTP 传输吞吐、连接复用收益、六工具行为对齐清单。参考 dsh-market 的 Speed 节把数据单独成节。
+6. **Features**(加粗 bullet): 多主机配置、一键切换运行机器、七工具远端执行、known_hosts 校验、连接池复用、远端零安装。
+7. **真实数据区(预留表格)**: 命令 RTT(本地 vs 远端实测)、SFTP 传输吞吐、连接复用收益、七工具行为对齐清单。参考 dsh-market 的 Speed 节把数据单独成节。
 8. **Install**: 前置条件(远端 sshd + 公钥认证/SFTP 开启)→ `dsh plugin --profile web add <包名>` → 手动安装备选。加 NOTE callout(需先装 DSH)。
 9. **Quick Start**(4 步编号): 设置页配主机 → 新建工作区选远端目录 → 切换运行机器 → 跑工具(参考 a4phone 步骤式)。
 10. **Config**(字段表: host/port/user/认证方式/known_hosts/超时/重连)。
@@ -92,8 +92,8 @@
 
 ## 后续进展(主编代理, 2026-08-16)
 
-- 包名定案: @aaravarr/dsh-ssh(npm 上无冲突的 dsh-ssh 已被占用; 全库 38 文件完成改名, 145→148/148 测试)。(注: 后改名至 @dsh-ssh/dsh-ssh, 见 implemented/process/2026-08-20-project-rename-dsh-ssh.md)
+- 包名定案: @dsh-ssh/dsh-ssh(npm 上无冲突的 dsh-ssh 已被占用; 全库 38 文件完成改名, 145→148/148 测试)。(注: 早期曾用临时 scope, 后定案 @dsh-ssh/dsh-ssh, 见 implemented/process/2026-08-20-project-rename-and-hygiene.md)
 - YAML 陷阱: id 值以 @ 起始时必须加引号(YAML 保留字符), cordis.patch.yml 已加引号。
 - publish.yml 已落地(tag v* + 版本校验 + NPM_TOKEN); 本地 npm 未登录, 发布需在 GitHub 仓库配置 NPM_TOKEN secret 后推 tag。
-- 实测数据已回填 README(性能/41 用例/兼容矩阵); 兼容矩阵详见 .agents/notes/research/compat-matrix.md。
-- 推送: 仓库已推至 github.com/aaravarr/ddsh(main); 偶发 github 网络瞬断时重试即可。
+- 实测数据已回填 README(性能/41 用例/兼容矩阵); 兼容矩阵详见 .agents/notes/research/2026-08-20-compat-matrix.md。
+- 推送: 仓库已推至 github.com/dsh-ssh/dsh-ssh(main); 偶发 github 网络瞬断时重试即可。

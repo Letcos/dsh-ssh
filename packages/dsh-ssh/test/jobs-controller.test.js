@@ -1,11 +1,12 @@
-// @dsh-ssh/dsh-ssh — 远端后台任务控制器注册 单元测试 (node --test, 无网络/IO)。
-// 验证 attachAgentJobsController + ⑤agent/created 钩子为远端 agent scope 补记 job controller:
-//   Cordis Service 按 scope 分层实例化, 遮蔽 bash 的 startRemoteBackground 用 agent.ctx.get('jobs')
-//   解析到 agent 自身 scope 的 jobs 实例; 若该实例全局层+自身 scope 链无 controller, start() 抛
+// @dsh-ssh/dsh-ssh — unit tests for remote background job controller registration (node --test, no network/IO).
+// Verifies that attachAgentJobsController and the agent/created hook add a job controller to the remote agent scope:
+//   Cordis instantiates services per scope; the routed bash's startRemoteBackground resolves agent.ctx.get('jobs')
+//   to the jobs instance of the agent's own scope. If that instance has no controller on the global layer
+//   or the agent's scope chain, start() throws
 //   "background jobs unavailable: no job controller serves this agent"
-//   (dsh-jobs-local/lib/index.js servesOwner/L132)。本文件用最小忠实模型模拟官方
-//   servesOwner(全局层优先, 其次沿 owner scope 链)+ attachController(注册进该 scope 层)语义,
-//   验证修复前后 servesOwner / start-guard 行为翻转 —— 修复后远端 agent 一定被 serve。
+//   (dsh-jobs-local/lib/index.js servesOwner). This file uses a minimal faithful model of the official
+//   servesOwner (global layer first, then owner scope chain) + attachController (register on that scope layer)
+//   to verify that the remote agent is served.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -15,13 +16,13 @@ import { ROUTED_TOOL_NAMES } from '../tools.js';
 import { mapRemoteToLocal } from '../src/router.js';
 
 const HOST_ID = '00000000-0000-4000-8000-000000000000';
-const REMOTE_PATH = '/home/ubuntu/opencode-api';
+const REMOTE_PATH = '/home/devuser/workspace';
 process.env.DSH_SSH_REMOTE_ROOT = path.join(os.homedir(), 'dsh-test-remote-root');
 
-// 最小忠实模型, 镜像官方 dsh-jobs-local 的 scope 分层判定:
-//   servesOwner: 全局层非空 → true; 否则沿 owner 的 scope 链找非空 controller 层。
-//   attachController: 在"当前 agent scope 层"追加一个 controller(官方用它自己的 registry ctx 决定层,
-//                     这里按 agent.ctx 解析到的该 jobs 实例的 scope 层 = 'agent')。
+// Minimal faithful model mirroring the official dsh-jobs-local scope-layer decision:
+//   servesOwner: non-empty global layer → true; otherwise walk the owner's scope chain for a non-empty controller layer.
+//   attachController: append a controller on the current agent scope layer (official uses its own registry ctx
+//                     to decide the layer; here the layer resolved via agent.ctx is 'agent').
 function makeScopedJobs() {
   let globalControllers = 0;
   const byScope = new Map();
@@ -32,13 +33,13 @@ function makeScopedJobs() {
     },
     servesOwner(owner) {
       if (globalControllers > 0) return true;
-      return (byScope.get('agent') ?? 0) > 0; // agent scope 链命中
+      return (byScope.get('agent') ?? 0) > 0; // hit on agent scope chain
     },
     _global(a) { globalControllers = a ? 1 : 0; },
   };
 }
 
-// 模拟 startRemoteBackground 中 jobs.start 的 controller 存在性守卫(与官方一致)。
+// Simulate the controller existence guard for jobs.start inside startRemoteBackground (matches official behavior).
 function startWithGuard(jobs, owner, guardName = '@dsh-ssh/dsh-ssh') {
   if (!jobs.servesOwner(owner)) {
     throw new Error('background jobs unavailable: no job controller serves this agent (load @deepseek-ai/dsh-tool-jobs in its composition)');
@@ -58,24 +59,24 @@ function makeRemoteAgent(jobs) {
   return agent;
 }
 
-// ── attachAgentJobsController 注册逻辑 ─────────────────────────────────────
+// ── attachAgentJobsController registration ─────────────────────────────────────
 test('attachAgentJobsController registers a controller on the agent job instance', () => {
   const jobs = makeScopedJobs();
   const agent = makeRemoteAgent(jobs);
-  // 基准: 全局层 + agent scope 层都无 controller → 不被 serve(修复前 start 会拒)
+  // Baseline: no controller on either global or agent scope → not served
   assert.equal(jobs.servesOwner(agent), false);
   assert.throws(() => startWithGuard(jobs, agent), /no job controller serves this agent/);
 
-  // 修复: 在 agent 自身 scope 注册 controller
+  // Register a controller on the agent's own scope
   const res = attachAgentJobsController(agent);
   assert.ok(res && typeof res.disposer === 'function');
   assert.equal(res.jobs, jobs);
 
-  // 修复后: 该 agent 被 serve, 后台任务 start 不再抛
+  // After registration the agent is served and background start no longer throws
   assert.equal(jobs.servesOwner(agent), true);
   assert.doesNotThrow(() => startWithGuard(jobs, agent));
 
-  // 释放后恢复
+  // Disposer restores previous state
   res.disposer();
   assert.equal(jobs.servesOwner(agent), false);
 });
@@ -119,7 +120,7 @@ test('attachAgentJobsController swallows a throwing attachController (never thro
   assert.equal(attachAgentJobsController(agent), null);
 });
 
-// ── ⑤ agent/created 钩子: 远端会话顺带注册 controller ────────────────────
+// ── agent/created hook: remote session registers a controller ────────────────────
 function makeHostCtx() {
   let handler = null;
   const warns = [];
@@ -157,6 +158,6 @@ test('hook: remote cwd → registers a job controller for the agent scope', () =
 
   assert.equal(jobs.servesOwner(agent), false);
   handler({ agent });
-  assert.equal(jobs.servesOwner(agent), true); // 钩子已顺带为 agent scope 注册 controller
-  assert.ok(registered.has('bash'));           // 远端 bash 路由实现照常注册
+  assert.equal(jobs.servesOwner(agent), true); // hook registered a controller on the agent scope
+  assert.ok(registered.has('bash'));           // remote bash route is registered as expected
 });

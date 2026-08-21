@@ -315,7 +315,7 @@ export class SshRemoteService extends Service {
    * real directory; idempotent when it already exists. @returns { localPath, hostId, remotePath }.
    *
    * The placeholder workspace record's title is written as host display name / basename
-   * (e.g. ubuntu / opencode-api) so the sidebar can distinguish hosts. The official
+   * (e.g. ubuntu / my-project) so the sidebar can distinguish hosts. The official
    * workspace.create wire only accepts { path } (dsh-host-apiproxy
    * workspaceCreateRequestSchema) and defaults the title to the directory basename, which
    * for a placeholder is the base64-encoded segment (unreadable, e.g. L2hvbWUv...; the actual

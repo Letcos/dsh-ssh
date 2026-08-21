@@ -1,9 +1,8 @@
-// @dsh-ssh/dsh-ssh — 方案⑤ agent/created 钩子 + scope 遮蔽 单元测试 (node --test, 无网络/IO)。
-// 验证: (a) registerRoutedTools 只注册指定名字 + 未知名抛错;
-//       (b) selectShadowNames 策略(a): 只返回 agent 视图里已可见的名字(纯策略, 不含 shell 例外);
-//       (c) installToolRoutingHook: 本地 cwd 零注册 / 远端 cwd 遮蔽可见名且 bash 必注册
-//           (决策 .agents/notes/decisions/2026-08-19-remote-shell-follows-remote-platform.md:
-//            bash 在远端会话总是注册路由实现, 不经过"已存在"过滤) / 异常不抛(veto 保护)。
+// @dsh-ssh/dsh-ssh — unit tests for agent/created hook and scope shadowing (node --test, no network/IO).
+// Verifies: registerRoutedTools registers only requested names and rejects unknown names;
+//       selectShadowNames returns only names already visible in the agent view (pure strategy, no shell exception);
+//       installToolRoutingHook: local cwd registers nothing / remote cwd shadows visible names and bash is always registered
+//           (remote shell follows remote platform: bash is always registered with the routed implementation for remote sessions, no existence filter) / errors are swallowed (veto protection).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -13,7 +12,7 @@ import { selectShadowNames, installToolRoutingHook } from '../index.js';
 import { mapRemoteToLocal } from '../src/router.js';
 
 const HOST_ID = '00000000-0000-4000-8000-000000000000';
-const REMOTE_PATH = '/home/ubuntu/opencode-api';
+const REMOTE_PATH = '/home/devuser/workspace';
 process.env.DSH_SSH_REMOTE_ROOT = path.join(os.homedir(), 'dsh-test-remote-root');
 
 function makeAgentCtx(visibleNames) {
@@ -38,9 +37,9 @@ function makeAgent(cwd, visibleNames) {
   return { agent, registered, scopeArgs };
 }
 
-// 带 sandbox 能力事实(shell/fs.sandboxMode 已挂)—— 真实远端部署下宿主 sandbox backend 总是挂着的,
-// 若无 remoteRouting, 路由工具会因此广告 escalation 字段。用于证明钩子(强制 remoteRouting=true)
-// 确实关闭广告(否则该断言会漏掉回归)。
+// With sandbox capability facts (shell/fs.sandboxMode present) the host sandbox backend is mounted;
+// without remoteRouting the routed tools would advertise escalation fields. This helper proves that the hook
+// (forced remoteRouting=true) indeed hides them; otherwise the assertion would miss the regression.
 function makeSandboxAgentCtx(visibleNames) {
   const registered = new Map();
   const scopeArgs = [];
@@ -69,13 +68,13 @@ function makeSandboxAgent(cwd, visibleNames) {
   return { agent, registered, scopeArgs };
 }
 
-// ── (a) registerRoutedTools ──────────────────────────────────────────────
+// ── registerRoutedTools ──────────────────────────────────────────────────
 test('registerRoutedTools registers exactly the named tools and returns names', () => {
   const { ctx, registered } = makeAgentCtx(new Set(ROUTED_TOOL_NAMES));
   const out = registerRoutedTools(ctx, ['bash', 'read']);
   assert.deepEqual(out.names, ['bash', 'read']);
   assert.deepEqual([...registered.keys()].sort(), ['bash', 'read']);
-  // 每个定义都带官方同形的 execute / output.render / output.schema
+  // Each definition carries the official-shaped execute / output.render / output.schema
   const bash = registered.get('bash');
   assert.equal(bash.name, 'bash');
   assert.equal(typeof bash.execute, 'function');
@@ -92,15 +91,15 @@ test('apply-registered set still covers all seven (via ROUTED_TOOL_NAMES)', () =
   assert.deepEqual([...ROUTED_TOOL_NAMES].sort(), ['bash', 'edit', 'glob', 'grep', 'read', 'read_image', 'write']);
 });
 
-// ── (b) selectShadowNames 策略(a) ────────────────────────────────────────
-test('selectShadowNames returns only names already visible in the agent view (strategy a)', () => {
+// ── selectShadowNames ───────────────────────────────────────────────────────
+test('selectShadowNames returns only names already visible in the agent view', () => {
   const visible = new Set(['bash', 'read', 'write', 'edit', 'read_image', 'glob', 'grep']);
   const { agent } = makeAgent('/tmp/local', visible);
   assert.deepEqual(selectShadowNames(agent), ROUTED_TOOL_NAMES);
 });
 
 test('selectShadowNames skips names absent from the agent view (minimal/code preset)', () => {
-  const visible = new Set(['bash']); // 只暴露 bash(模拟 minimal preset)
+  const visible = new Set(['bash']); // only bash exposed (simulating minimal preset)
   const { agent } = makeAgent('/tmp/local', visible);
   assert.deepEqual(selectShadowNames(agent), ['bash']);
 });
@@ -108,7 +107,7 @@ test('selectShadowNames skips names absent from the agent view (minimal/code pre
 test('selectShadowNames passes the agent object itself as the scope key', () => {
   const { agent, scopeArgs } = makeAgent('/tmp/local', new Set(['bash']));
   selectShadowNames(agent);
-  // scope key === agent 对象本身(dsh-agent-loop createScope(loopCtx, this))
+  // scope key is the agent object itself (dsh-agent-loop createScope(loopCtx, this))
   assert.ok(scopeArgs.every((s) => s === agent));
 });
 
@@ -119,15 +118,15 @@ test('selectShadowNames tolerates a get that throws (returns empty, never throws
   assert.deepEqual(selectShadowNames(agent, ['bash']), []);
 });
 
-test('selectShadowNames does not force bash (pure strategy a; shell forcing lives in the hook)', () => {
-  // 视图无 bash(模拟 Windows 宿主 standard preset) → selectShadowNames 仍只返回可见名,
-  // bash 的强制注册由 installToolRoutingHook 对远端会话负责, 不污染纯函数。
+test('selectShadowNames does not force bash (shell forcing lives in the hook)', () => {
+  // View without bash (simulating Windows host standard preset) → still only returns visible names;
+  // bash forcing is handled by installToolRoutingHook for remote sessions only and keeps this pure function clean.
   const visible = new Set(['read', 'write', 'edit', 'read_image', 'glob', 'grep']);
   const { agent } = makeAgent('/tmp/local', visible);
   assert.deepEqual(selectShadowNames(agent), ['read', 'write', 'edit', 'read_image', 'glob', 'grep']);
 });
 
-// ── (c) installToolRoutingHook ───────────────────────────────────────────
+// ── installToolRoutingHook ───────────────────────────────────────────────
 function makeHostCtx() {
   let handler = null;
   const warns = [];
@@ -143,7 +142,7 @@ function makeHostCtx() {
 test('hook: local cwd → no tool registered (zero impact)', () => {
   const host = makeHostCtx();
   installToolRoutingHook(host);
-  const { agent, registered } = makeAgent('/Users/haowu/project', new Set(ROUTED_TOOL_NAMES));
+  const { agent, registered } = makeAgent('/home/devuser/project', new Set(ROUTED_TOOL_NAMES));
   host._handler()({ agent });
   assert.equal(registered.size, 0, 'local cwd must not shadow anything');
 });
@@ -151,9 +150,9 @@ test('hook: local cwd → no tool registered (zero impact)', () => {
 test('hook: local cwd + no bash in view → nothing registered (bash not forced locally)', () => {
   const host = makeHostCtx();
   installToolRoutingHook(host);
-  const { agent, registered } = makeAgent('/Users/haowu/project', new Set(['read']));
+  const { agent, registered } = makeAgent('/home/devuser/project', new Set(['read']));
   host._handler()({ agent });
-  assert.equal(registered.size, 0, 'bash 例外只作用于远端会话, 本地 cwd 绝不注册任何路由工具');
+  assert.equal(registered.size, 0, 'bash exception applies to remote sessions only; local cwd registers no routed tools');
 });
 
 test('hook: remote placeholder cwd → shadows only visible names', () => {
@@ -181,19 +180,19 @@ test('hook: remote cwd with no visible tools → bash still registered (shell fo
   const placeholderCwd = mapRemoteToLocal(HOST_ID, REMOTE_PATH);
   const { agent, registered } = makeAgent(placeholderCwd, new Set());
   host._handler()({ agent });
-  assert.deepEqual([...registered.keys()], ['bash'], 'bash 必注册, 不经过策略 (a) 的"已存在"过滤');
+  assert.deepEqual([...registered.keys()], ['bash'], 'bash must be registered without existence filtering');
 });
 
 test('hook: remote cwd + Windows view without bash → bash registered alongside six fs/search tools', () => {
   const host = makeHostCtx();
   installToolRoutingHook(host);
   const placeholderCwd = mapRemoteToLocal(HOST_ID, REMOTE_PATH);
-  // Windows 宿主 standard preset: tool-bash 被 platform 禁用 → 视图无 bash, 只有六文件/搜索工具
+  // Windows host standard preset: tool-bash is platform-disabled → view has no bash, only six file/search tools
   const visible = new Set(['read', 'write', 'edit', 'read_image', 'glob', 'grep']);
   const { agent, registered } = makeAgent(placeholderCwd, visible);
   host._handler()({ agent });
   assert.deepEqual([...registered.keys()].sort(), [...ROUTED_TOOL_NAMES].sort(),
-    '六文件/搜索工具按策略 (a) 遮蔽, bash 补注册(决策 2026-08-19-remote-shell-follows-remote-platform)');
+    'six file/search tools shadowed; bash is additionally registered (remote shell follows remote platform)');
 });
 
 test('hook: missing cwd → no throw, no registration', () => {
@@ -223,30 +222,30 @@ test('hook: dispose returned and handler captured', () => {
   assert.equal(host._handler(), handler);
 });
 
-// ── (d) subagent 语境(A.40): agent/created 对 subagent 同效 + escalation 字段隐藏 ──────────────
-test('subagent 继承会话远端 cwd → 钩子遮蔽; 且路由工具 escalation 字段隐藏(remoteRouting)', () => {
+// ── subagent context: agent/created applies to subagents as well and escalation fields stay hidden ──────────────────
+test('subagent inherits remote cwd from session → hook shadows; routed tools hide escalation fields (remoteRouting)', () => {
   const host = makeHostCtx();
   installToolRoutingHook(host);
   const placeholderCwd = mapRemoteToLocal(HOST_ID, REMOTE_PATH);
-  // subagent 与主 agent 同构: 也是 agent/created 事件, session.header.cwd 继承会话的远端占位路径,
-  // 故钩子对其同样生效(index.js installToolRoutingHook 只按 cwd 路由, 不区分主/子代理)。
+  // Subagent is structurally identical to the main agent: same agent/created event, session.header.cwd inherits the remote placeholder path,
+  // so the hook applies equally regardless of main/subagent distinction.
   const { agent, registered } = makeSandboxAgent(placeholderCwd, new Set(ROUTED_TOOL_NAMES));
   host._handler()({ agent });
-  assert.deepEqual([...registered.keys()].sort(), [...ROUTED_TOOL_NAMES].sort(), 'subagent 的远端 cwd 应触发全七工具遮蔽');
-  // 宿主 sandbox backend 已挂(否则上面 helper 无法证明 remoteRouting 的作用)—— 若钩子忘了传
-  // remoteRouting=true, 这里 bash/write/edit 就会暴露 sandbox_permissions/justification, 测试抓回归。
+  assert.deepEqual([...registered.keys()].sort(), [...ROUTED_TOOL_NAMES].sort(), 'subagent remote cwd must trigger shadowing of all seven tools');
+  // Host sandbox backend is mounted (otherwise the helper could not prove remoteRouting effect) — if the hook forgot
+  // remoteRouting=true, bash/write/edit would expose sandbox_permissions/justification; this catches the regression.
   for (const name of ['bash', 'write', 'edit']) {
     const def = registered.get(name);
     const props = (def.parameters ?? {}).properties ?? {};
-    assert.ok(!('sandbox_permissions' in props), 'subagent 的路由 ' + name + ' 不得暴露 sandbox_permissions');
-    assert.ok(!('justification' in props), 'subagent 的路由 ' + name + ' 不得暴露 justification');
+    assert.ok(!('sandbox_permissions' in props), 'routed ' + name + ' for subagent must not expose sandbox_permissions');
+    assert.ok(!('justification' in props), 'routed ' + name + ' for subagent must not expose justification');
   }
 });
 
-test('subagent 本地 cwd(非远端)→ 钩子零介入(本地 subagent 不被遮蔽, 无升级字段影响)', () => {
+test('subagent with local cwd (non-remote) → hook does not intervene (local subagent stays unshadowed, no escalation impact)', () => {
   const host = makeHostCtx();
   installToolRoutingHook(host);
-  const { agent, registered } = makeSandboxAgent('/Users/haowu/local-project', new Set(ROUTED_TOOL_NAMES));
+  const { agent, registered } = makeSandboxAgent('/home/devuser/local-project', new Set(ROUTED_TOOL_NAMES));
   host._handler()({ agent });
-  assert.equal(registered.size, 0, 'subagent 本地 cwd 不得注册任何路由工具');
+  assert.equal(registered.size, 0, 'subagent with local cwd must not register any routed tools');
 });

@@ -55,7 +55,7 @@ for (const d of lib.CLIENT_TYPERT_REMOTE.descriptors) {
   assert.ok(code.includes(line), 'client.js must inline descriptor line: ' + line);
 }
 
-// M4-fix: the combined picker must be registered into BOTH holes at
+// The combined picker must be registered into BOTH holes at
 // priority -1 (single slots are unique per priority; lowest renders — the
 // stock browse picker occupies default priority 0), using the nested
 // slots.inject generator pattern (mirrors dsh-client-ui-directory-picker-browse).

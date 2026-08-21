@@ -13,8 +13,7 @@
 #   - 包为 scope 包无需 --access 也能发布, 但这里显式加 `--access public`,
 #     与 package.json 的 publishConfig.access=public 双重保险, 防止 scope 包
 #     默认 private 被拒。
-#   - 若把包改名到新 scope (如 @dsh-ssh/dsh-ssh), 记得让 NPM_TOKEN 对该 scope
-#     有发布权限。
+#   - 若更换 scope, 需确保 NPM_TOKEN 对新 scope 有发布权限。
 # =============================================================================
 
 name: Release (npm publish)
@@ -57,7 +56,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 发布前单测必须全绿 (基线 272 tests, fail 0)。
+      # 发布前单测必须全绿（fail=0）。
       - name: Run unit tests
         run: |
           cd packages/dsh-ssh
@@ -81,9 +80,13 @@ jobs:
           fi
           echo "Version check passed."
 
+      # 保证 npm 包内的 README 与根 README 同步（发布时自动生成，消除双份维护）。
+      - name: Build package README
+        run: node packages/dsh-ssh/scripts/build-readme.mjs
+
       # 发布目录为 packages/dsh-ssh (整个包目录)。
       # package.json 的 files 白名单已排除 test/, 只发布
-      # index.js/tools.js/client.js/src/lib/preset/scripts/cordis.patch.yml。
+      # index.js/tools.js/client.js/cordis.patch.yml/src/lib/tools。
       - name: Publish to npm
         run: npm publish --access public
         working-directory: packages/dsh-ssh

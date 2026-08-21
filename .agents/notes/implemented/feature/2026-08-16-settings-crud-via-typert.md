@@ -3,7 +3,7 @@ Status: implemented
 
 ## Problem
 - 设置页要 CRUD SSH 主机配置并安全存储口令/私钥;F2 测试连接要复用真实 SSH 握手。初期走官方 `api.settings`(describe/update/mutate),用户实测报 `settings namespace "dsh-ssh-hosts" is not exposed to configuration clients`。
-- 且 settings 存储形状(h array vs dict)决定「口令留空=保持已存」能否表达。
+- 且 settings 存储形状(hosts array vs dict)决定「口令留空=保持已存」能否表达。
 
 ## Decision
 - **CRUD 全走自建 Typert 远程**(testConnection 同款通道):宿主 `SshRemoteService extends Service`(key 'ssh')+ `bindTypertRemote` + `ctx.typert.register(HOST_TYPERT_CONTRIBUTION)` 注册严格 descriptor(src-json codec);客户端 `ctx.remote.$mount(CLIENT_TYPERT_REMOTE)` + 调 `ctx.remote.ssh.{listHosts,saveHost,deleteHost,testConnection,...}`。--- 这是 settings 子系统的硬边界:第三方插件的命名空间 CRUD 只能走 Typert(api.settings 只对白名单命名空间开放,`WEB_SETTINGS_NAMESPACES` / `PRODUCT_SETTINGS_NAMESPACES` 不含第三方)。

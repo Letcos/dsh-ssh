@@ -1,8 +1,8 @@
 # 官方 DeepSeek Harness 仓库 AGENTS.md 存档
 
-> 来源: https://github.com/deepseek-ai/deepseek-harness (master 分支, 根目录 AGENTS.md), 2025-08-16 抓取存档。
-> 用途: 用户要求"参考 DSH 官方 agent 工作流"。dssh 是外部插件项目, 不强制遵守, 但借鉴其信条与规范。
-> 官方仓库 .agents/ 结构: notes/(Agent Notes) + skills/(dsh-pre-push-checks、dsh-doc-standards、dsh-prose-standard 等); docs/AGENTS.md 为文档规范。要点见 dsh-official-reference.md §四。
+> 来源: https://github.com/deepseek-ai/deepseek-harness (master 分支, 根目录 AGENTS.md), 2026-08-16 抓取存档。
+> 用途: 用户要求"参考 DSH 官方 agent 工作流"。dsh-ssh 是外部插件项目, 不强制遵守, 但借鉴其信条与规范。
+> 官方仓库 .agents/ 结构: notes/(Agent Notes) + skills/(dsh-pre-push-checks、dsh-doc-standards、dsh-prose-standard 等); docs/AGENTS.md 为文档规范。要点见 2026-08-20-dsh-official-reference.md §四。
 
 ---
 

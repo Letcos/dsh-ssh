@@ -19,7 +19,7 @@ Status: implemented
 ## Consequences
 - job_output/job_list/job_kill 对远端任务自动可用(经宿主 jobs registry,与本地一致)。
 - 前端 exec 超时路径 best-effort killForegroundTree;远端后台进程可脱离通道存活(输出重定向日志,由 readOutput 轮询取回)。
-- live-jobs.mjs / live-background-verify.mjs / verify-remote-bg-created.mjs 保留为可复跑真机脚本。
+- `scripts/verify-remote-bg-created.mjs` 保留为可复跑真机脚本（真实 cordis 组合版 E2E，覆盖后台任务 running/增量输出/kill 进程组等核心验收）。
 
 ## 出处
 - archived/a-series-log.md A.17(审计差距)、A.22(P1 接入)、A.28(job controller)、A.30(lossless JSON)、A.33(假完成复核)、A.35(jobDir mkdir)。

@@ -15,7 +15,7 @@
 ├── AGENTS.md                # notes 层操作规则
 ├── requirements-and-design.md  # 需求+设计权威笔记(稳定规范,不含流水)
 ├── research/                # 外部调研笔记(官方文档/协议/竞品, 只读事实)
-├── design/                  # 设计规格(如 ui-ux-spec.md)
+├── design/                  # 设计规格(如 2026-08-20-ui-ux-spec.md)
 ├── implemented/             # 已落地/已决策 note(本目录主体)
 │   ├── architecture/
 │   ├── feature/
@@ -23,14 +23,15 @@
 │   ├── simplification/
 │   ├── process/
 │   └── testing/
-├── proposed/                # 提案中(当前为空, 立项时建)
+├── proposed/                # 提案中(待决策提案；空时以 README 占位)
 ├── rejected/                # 被否定的方案(保留否决理由)
 └── archived/                # 冻结的历史流水与旧 note
     └── a-series-log.md      # 原 requirements 附录 A/B 流水, 冻结
 ```
 
 类别 subdirectory 枚举:`architecture`(架构) / `feature`(功能) / `bug-fix`(修复) / `simplification`(简化/删除) / `process`(过程/改名/规范) / `testing`(测试体系)。
-文件名约定:`yyyy-mm-dd-topic.md`(topic 用 kebab-case, 一提一文件)。
+文件名约定:`yyyy-mm-dd-topic.md`(topic 用 kebab-case, 一提一文件)；`research/` 与 `design/` 下的文件同样遵循此命名约定。
+空分类目录以 `README.md` 占位以便 git 追踪，待有首条 note 落地后占位与正文共存或按需移除。
 
 ## 3. 一条 note = 一个主题
 

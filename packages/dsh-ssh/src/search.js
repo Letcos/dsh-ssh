@@ -38,12 +38,12 @@ import { shellQuoteSingle } from './ssh-core.js';
 // ═══════════════════════════════════════════════════════════════════════════
 // Constants (mirroring official dsh-tool-fs-search defaults)
 // ═══════════════════════════════════════════════════════════════════════════
-export const GLOB_MAX_RESULTS = 100;          // 官方 globMaxResults
-export const GREP_MAX_MATCHES = 250;          // 官方 grepMaxMatches
-export const GREP_MAX_LINE_BYTES = 2000;      // 官方 grepMaxLineBytes
-export const SEARCH_META_MAX_BYTES = 65536;   // 官方 searchMetaMaxBytes
-export const RAW_OUTPUT_MAX_BYTES = 2e7;      // 官方 rawOutputMaxBytes(20MB)
-export const SEARCH_TIMEOUT_MS = 3e4;         // 官方 timeoutMs(30s)
+export const GLOB_MAX_RESULTS = 100;          // mirrors official globMaxResults
+export const GREP_MAX_MATCHES = 250;          // mirrors official grepMaxMatches
+export const GREP_MAX_LINE_BYTES = 2000;      // mirrors official grepMaxLineBytes
+export const SEARCH_META_MAX_BYTES = 65536;   // mirrors official searchMetaMaxBytes
+export const RAW_OUTPUT_MAX_BYTES = 2e7;      // mirrors official rawOutputMaxBytes (20MB)
+export const SEARCH_TIMEOUT_MS = 3e4;         // mirrors official timeoutMs (30s)
 export const GLOB_VCS_EXCLUDES = ['.git', '.svn', '.hg', '.bzr', '.jj', '.sl'];
 
 // Official SearchError taxonomy (the registry exposes {name, code} on isError results).

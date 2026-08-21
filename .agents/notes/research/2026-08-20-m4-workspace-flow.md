@@ -1,7 +1,7 @@
 # M4 远端工作区流程调研(目录浏览槽 + 占位目录 + 客户端挂载)
 
-> M4 前置调研(2025-08, 子代理)。结论全部来自本地源码, 出处 = 文件路径:行。
-> 源码根: /opt/homebrew/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/ 简写为 [D]。
+> M4 前置调研(2026-08, 子代理)。结论全部来自本地源码, 出处 = 文件路径:行。
+> 源码根: <dsh-checkout>/node_modules/@deepseek-ai/ 简写为 [D]。
 > 验证状态: 源码核对 ✅; 未在真实 GUI 运行, 运行时行为标注"待真机"。
 
 ## 1. directoryFlow 槽完整契约
@@ -79,31 +79,31 @@
 2. host: 订阅 domain/changed, put 记录 id→path、deleted 清占位目录; 单测(建/删工作区 → 占位目录随动)。
 3. client: 新 occupant 组件(远端目录对话框, 参照 directory-picker-browse 的嵌套 slots.inject 注册进两洞), props 用 DirectoryFlowOwnerProps + inject 的 ctx.remote.ssh 包装。
 4. client: 确认 → ssh.createPlaceholder → onPicked(localPath); busy 禁用提交; onCancel/onError 必处理; 支持"远端新建目录"(mkdirs)。
-5. 验证: 单测全过 + dump-config/静态契约检查; 真机 UI(选远端目录→建工作区→六工具跑在远端)待发布阶段 web 重建后验收。
-## 6. M4 实现结果(2025-08, 子代理; 单测+静态契约验证 ✅, 真机 UI 待发布阶段)
+5. 验证: 单测全过 + dump-config/静态契约检查; 真机 UI(选远端目录→建工作区→七工具跑在远端)待发布阶段 web 重建后验收。
+## 6. M4 实现结果(2026-08, 子代理; 单测+静态契约验证 ✅, 真机 UI 待发布阶段)
 
 **做了什么(全部按 §1-§5 契约执行, 零 core 改动)**:
 - 宿主 packages/dsh-ssh/src/remote.js: SshRemoteService 增 4 端点(均走既有 SshError 包装):
   - listRemoteDir(hostId, path): SFTP readdir → [{name,type,size?,mtime?}], 排序目录在前+名称字典序。
   - statRemote(hostId, path): 直接读 SftpWrapper 的原始 handle(sftp.sftp.stat)取 mtime —— **踩坑: SftpWrapper.stat 丢弃 mtime, 而 ssh-core.js 是 M3c 划界文件不能改, 故在 remote.js 内绕开 wrapper.stat**; ENOENT → null(JSON 安全, 不用 undefined)。
   - resolveRemoteHome(hostId): exec("echo $HOME"), 非绝对路径结果拒收。
-  - createPlaceholder(hostId, remotePath): 校验 hostId 在 dssh-hosts dict 中存在(readState().hosts) → 复用 src/router.js 的 mapRemoteToLocal 编码(根 = DSSH_REMOTE_ROOT > $DSH_HOME/remote > ~/.dsh/remote) → fs.mkdir({recursive:true}) 真实目录 → {localPath, hostId, remotePath}; 幂等。
+  - createPlaceholder(hostId, remotePath): 校验 hostId 在 dsh-ssh-hosts dict 中存在(readState().hosts) → 复用 src/router.js 的 mapRemoteToLocal 编码(根 = DSH_SSH_REMOTE_ROOT > $DSH_HOME/remote > ~/.dsh/remote) → fs.mkdir({recursive:true}) 真实目录 → {localPath, hostId, remotePath}; 幂等。
   - 连接类端点统一 _acquireStored(hostId): 走 resolveStored(未脱敏 settings 值)拿配置再 sshPool.acquire, 未配置 → SshError(stage resolve-host)。
   - 新文件 packages/dsh-ssh/src/placeholder.js: 纯函数 createPlaceholderDir({hostId, remotePath, env, fsImpl}), fs/env 可注入(单测 mock), 校验+编码+mkdir 分离。
 - lib/typert-contribution.js + client.js 内联描述符: 各加 4 条(listRemoteDir/statRemote/resolveRemoteHome/createPlaceholder), 走同一个 descriptor 工厂, host src-json / client strict passthrough; assertContributionShape 自动校验(端点不重复)。client-selfcheck 的"内联↔lib 逐字钉死"循环自动覆盖新描述符。
 - 客户端 client.js: 新 occupant RemoteDirFlow(纯 React + primitives), 嵌套 slots.inject generator 注册进两洞(照抄 directory-picker-browse L1026-1035); 交互流 = 选主机(listHosts) → 目录浏览(listRemoteDir 进入/返回/家目录) → 使用此目录(createPlaceholder → onPicked(localPath)); onCancel/onError 完整处理(open 上升沿 generation+reported 双守卫, 每 open 恰一结果; busy/adopting 禁用提交与关闭); 浏览/占位失败留对话框内可重试, listHosts 失败(含 remote 未挂载) → onError; 文案进新 locale ns workspace.ssh(zh/en)。remoteCall 守卫: $mount 是异步的, ctx.remote.ssh 未就绪时拒绝成 Promise 而非同步 throw(参考调研 §4)。
 
-**验证结果**(2025-08):
+**验证结果**(2026-08):
 - node --check 全部新改文件 ✅。
 - 定向测试 44 全过: m4-placeholder.test.js(编码复用/幂等/mock fs/DSH_HOME 尊重/真实目录落地 tmp 隔离) + remote.test.js 新 5 用例(mock sftp/exec/settings) + typert-contribution.test.js(8 端点断言) + router.test.js。
 - 全量 143 中 141 过; 2 失败均在 test/ssh-core.test.js(M3c 中间态, 已确认非本任务引入, 未动该文件)。
 - node scripts/client-selfcheck.mjs(仓库根跑) ✅。
-- dsh --profile dssh-dev --dump-config exit 0, dsh-ssh 插件行在组合中 ✅。
+- dsh --profile dsh-ssh-dev --dump-config exit 0, dsh-ssh 插件行在组合中 ✅。
 
 **踩坑/注意**:
 - macOS /var → /private 符号链接: 占位"真实目录非符号链接"断言须与 canonical 逻辑路径比较(realpath(tmp)/remote/h1/enc), 直接 realpath(localPath)===localPath 会误报。
 - Typert 端点参数是位置参数(wire 字段序 = 方法签名序, 参考 saveHost(id,patch,revision)); 新端点签名必须 (hostId, path) 顺序。
-- resolveStored(settings 未脱敏) 与 settingsApi(读 dssh-hosts dict)是两条线: 连接类走前者, createPlaceholder 校验走后者 readState()。
+- resolveStored(settings 未脱敏) 与 settingsApi(读 dsh-ssh-hosts dict)是两条线: 连接类走前者, createPlaceholder 校验走后者 readState()。
 - 按 §5 建议的 domain/changed 订阅(占位目录随 workspace 删除清理)本轮未实现(任务书只含浏览+占位), 留 M4 后续/真机验收前补。
 
 **待发布阶段真机验证清单**:
@@ -111,11 +111,11 @@
 2. 选主机 → 家目录列出 → 进入/返回/家目录导航正确; 中文/空格目录名正常。
 3. 使用此目录 → 本地 ~/.dsh/remote/<hostId>/<enc> 真实目录出现 → 工作区创建成功(registry realpath 通过)。
 4. busy 期间 "使用此目录" 禁用; 取消/错误路径不重复报告。
-5. 切换到 standard-ssh preset 的工作区, 六工具跑在远端(与 M3 联调)。
+5. 远端占位工作区(经 agent/created 钩子路由), 七工具跑在远端(与 M3 联调)。
 
-## 7. 单例槽优先级冲突修复(2025-08, 紧急修复子代理)
+## 7. 单例槽优先级冲突修复(2026-08, 紧急修复子代理)
 
-**根因**(源码核对 [D]=/opt/homebrew/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/):
+**根因**(源码核对 [D]=<dsh-checkout>/node_modules/@deepseek-ai/):
 - directoryFlow 两洞都是 kind 'single' + scope 'root', 单例槽按优先级唯一: 同一 priority 重复注册直接抛错, 排序取最小优先级渲染([D]/dsh-client-ui-slots/lib/index.js:68-73 register 检查, :122 排序, :179-193 entriesOfSlot 取每格首个)。
 - 官方 @deepseek-ai/dsh-client-ui-directory-picker-browse 已用默认 priority 0 注册 BrowseDirectoryFlow 进两洞(client.js:1026-1035, register 无 priority 选项 → 0)。
 - 我们 M4 的 RemoteDirFlow 也以默认 priority 0 注册 → **client apply 抛 "already has a registration … register at a different priority to shadow it (lowest renders)" → 整个客户端模块失效 → 设置页连带不出现**(settings.section 本身无冲突, 是同一 apply 连带失败)。
@@ -129,11 +129,11 @@
 - locale workspace.ssh 增补: title 改「选择工作区目录」, 新增 tab.local/tab.remote + local.*(zh/en); 远程页签文案沿用旧键。
 - inject = ["slots","workspaces","locale","remote"](对齐官方 inject 顺序 slots/workspaces/locale 追加 remote)。
 
-**验证**(2025-08, 全部通过):
+**验证**(2026-08, 全部通过):
 - node --check packages/dsh-ssh/client.js ✅。
 - node --test 'packages/dsh-ssh/test/*.test.js': 149/149 ✅(含此前 2 个 ssh-core 失败用例现已过, 与本次改动无关)。
 - node packages/dsh-ssh/scripts/client-selfcheck.mjs ✅(同步钉死: inject 含 workspaces、两洞注册 priority:-1×2、ctx.workspaces.listDirectory/createDirectory、DirectoryFlowCombined/LocalFlowBody/RemoteFlowBody)。
-- dsh --profile web --dump-config exit 0 ✅(web profile 未装本插件, 仅验证无破坏); dsh --profile dssh-dev --dump-config 中 @aaravarr/dsh-ssh 插件行在 ✅。
+- dsh --profile web --dump-config exit 0 ✅(web profile 未装本插件, 仅验证无破坏); dsh --profile dsh-ssh-dev --dump-config 中 @dsh-ssh/dsh-ssh 插件行在 ✅。
 - 未启动服务; 未改 checkout(只读参考); 未动 ssh-core/tools/search 等其它文件。
 
 **待真机验证清单**(GUI 重启后):
@@ -141,4 +141,4 @@
 2. 本地页签: 家目录列出 → 进入/上级/家导航; 新建文件夹出现在列表; 打开 → 本地工作区创建成功(registry realpath 通过); busy 期间打开/取消禁用。
 3. 远程页签: 选主机 → 家目录 → 浏览导航 → 使用此目录 → ~/.dsh/remote/<hostId>/<enc> 占位目录出现 → 工作区创建成功。
 4. 页签切换不丢 open 守卫: 任一页签报告结果后对话框关闭, 不重复报告。
-5. 切 standard-ssh preset 工作区, 六工具跑在远端(M3 联调)。
+5. 远端占位工作区(经 agent/created 钩子路由), 七工具跑在远端(M3 联调)。

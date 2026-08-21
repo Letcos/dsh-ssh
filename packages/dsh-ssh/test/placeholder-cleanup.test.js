@@ -1,7 +1,7 @@
-// installPlaceholderCleanup: 工作区记录删除 → 清理本地占位目录(M4 补充)。
-import test from 'node:test';
+// installPlaceholderCleanup: deleting a workspace record cleans up the local placeholder directory.
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, access, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { installPlaceholderCleanup } from '../index.js';
@@ -15,8 +15,16 @@ function makeCtx() {
   };
 }
 
-test('put 记录 id→path; deleted 触发 rm(仅限占位根内)', async () => {
+// Each test creates an isolated temp placeholder root via mkdtemp; collect and remove them all
+// after the suite so no temp directories are left behind.
+const createdRoots = [];
+after(async () => {
+  await Promise.all(createdRoots.map((r) => rm(r, { recursive: true, force: true })));
+});
+
+test('put records id→path; deleted triggers rm (only inside placeholder root)', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-ssh-cleanup-'));
+  createdRoots.push(root);
   const removed = [];
   const ctx = makeCtx();
   const inst = installPlaceholderCleanup(ctx, {
@@ -37,8 +45,9 @@ test('put 记录 id→path; deleted 触发 rm(仅限占位根内)', async () => 
   assert.equal(inst.byWorkspace.has(wsId), false);
 });
 
-test('占位根之外/其他域的事件被忽略', async () => {
+test('events outside placeholder root / other domains are ignored', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-ssh-cleanup-'));
+  createdRoots.push(root);
   const removed = [];
   const ctx = makeCtx();
   const inst = installPlaceholderCleanup(ctx, { placeholderRoot: root, rm: async (p) => removed.push(p) });
@@ -51,8 +60,9 @@ test('占位根之外/其他域的事件被忽略', async () => {
   assert.equal(inst.byWorkspace.size, 0);
 });
 
-test('create/delete 词汇同样受支持', async () => {
+test('create/delete operation words are also supported', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-ssh-cleanup-'));
+  createdRoots.push(root);
   const removed = [];
   const ctx = makeCtx();
   installPlaceholderCleanup(ctx, { placeholderRoot: root, rm: async (p) => removed.push(p) });

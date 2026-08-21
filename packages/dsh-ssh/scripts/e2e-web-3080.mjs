@@ -1,27 +1,30 @@
-// @dsh-ssh/dsh-ssh — 3080 全工具 E2E(HTTP API 驱动真实 web-app 会话)
-// 作用: 不重启不停止 3080, 只通过 POST http://127.0.0.1:3080/api/<method> 的信封驱动真实会话,
-//       对远端占位工作区跑 8 组工具用例(bash 前台 / write / read / edit / glob / grep / 后台链 / 清理),
-//       结尾用 bash 清理 e2e 产物(保留目录)。
-// 信封: {"type":"client-request","rpcId":"x","method":"<m>","params":{},"payload":{...}}
+// @dsh-ssh/dsh-ssh — 3080 full-tool E2E (driven via HTTP API against a real web-app session)
+// Purpose: without restarting or stopping 3080, drive a real session only via POST http://127.0.0.1:3080/api/<method> envelopes,
+//       run 8 tool cases against the remote placeholder workspace (bash foreground / write / read / edit / glob / grep / bg chain / cleanup),
+//       and finally clean up e2e artifacts with bash (keeping the directory).
+// Envelope: {"type":"client-request","rpcId":"x","method":"<m>","params":{},"payload":{...}}
 //   session.create {cwd,agentPreset:"standard"} -> result.value.sessionId
 //   session.selectModel {sessionId,provider,model}
 //   session.prompt {sessionId,mode:"queue",content:[{type:"text",text}]}
-//   session.history {sessionId} -> result.value.events, 每项 {event:{type,seq,data}}
-// 单回合判定: 轮询到「新增事件里出现 turn/end」即一回合结束(间隔 3s, 上限 150s)。
-// 工具结果: tool/call.data={callId,name,arguments};
+//   session.history {sessionId} -> result.value.events, each {event:{type,seq,data}}
+// Single-turn decision: polling until "a newly added event contains turn/end" means one turn ends (interval 3s, cap 150s).
+// Tool results: tool/call.data={callId,name,arguments};
 //           tool/result.data.message.content[0]={type:"tool-result",toolCallId,isError,content:[{type:"text",text}]}
-// 用法: node scripts/e2e-web-3080.mjs   (服务地址来自 live-config.mjs e2eBase, 可 DSH_SSH_TEST_E2E_BASE / E2E_BASE 覆盖)
-// 退出码: 全部通过 -> 0; 任一失败 -> 1。输出为 PASS/FAIL 汇总表(<=60 行)。
+// Usage: node scripts/e2e-web-3080.mjs   (service address from live-config.mjs e2eBase, overridable via DSH_SSH_TEST_E2E_BASE / E2E_BASE)
+// Exit code: all pass -> 0; any fail -> 1. Output is a PASS/FAIL summary table (<=60 lines).
 // PREREQ: a running DSH web-app with this plugin, listening where live-config.mjs e2eBase
 // points (default http://127.0.0.1:3080; override DSH_SSH_TEST_E2E_BASE / E2E_BASE).
 // Switch machines via DSH_SSH_DSH_HOME + DSH_SSH_TEST_HOST_ID (placeholder root & hostId).
+// PREREQ: <REMOTE>/note.txt must be pre-seeded on the remote with content "hello dsh-ssh e2e";
+// this script drives a live session and does not create it. REMOTE comes from live-config.mjs
+// remoteWorkspace (DSH_SSH_TEST_REMOTE_WORKSPACE override, default /tmp/dsh-ssh-remote-workspace).
 
 import path from 'node:path';
 import { liveConfig, requireRealHost } from '../test/live-config.mjs';
 requireRealHost('scripts/e2e-web-3080');
 
 const base = liveConfig.e2eBase;
-const REMOTE = '/tmp/dsh-ssh-e2e-web';
+const REMOTE = liveConfig.remoteWorkspace;
 // Remote workspaces are local placeholders <dshHome>/remote/<hostId>/<base64url(remote path)>.
 const PLACEHOLDER = path.join(liveConfig.dshHome, 'remote', liveConfig.hostId, Buffer.from(REMOTE, 'utf8').toString('base64url'));
 const MODEL = 'deepseek-v4-flash';
@@ -43,7 +46,7 @@ async function openSession() {
   return sid;
 }
 
-// 单会话轮询器: 维护 ingested 游标; 每次 prompt 后等到「新增事件里出现 turn/end」
+// Single-session poller: maintains an ingested cursor; after each prompt wait until "a newly added event contains turn/end"
 function makePoller(sid) {
   let ingested = 0;
   return async function runTurn(text) {
@@ -58,7 +61,7 @@ function makePoller(sid) {
     }
     const newEv = ev.slice(ingested);
     ingested = Math.max(ingested, ev.length);
-    // callId -> name 配对 tool/call 与 tool/result
+    // callId -> name pairing for tool/call and tool/result
     const nameById = new Map();
     const results = [];
     for (const it of newEv) {
@@ -80,7 +83,7 @@ function findBy(results, name, pred) {
   return results.find((r) => r.name === name && (!pred || pred(r)));
 }
 
-// ---- 结果簿 ----
+// ---- Result ledger ----
 const rows = [];
 function record(no, desc, pass, detail) { rows.push({ no, desc, pass, detail }); }
 
@@ -168,7 +171,7 @@ async function caseGrep() {
 async function caseBgChain() {
   const sid = await openSession();
   const poll = makePoller(sid);
-  // 12 x 5s = 60s, 保证 job_list 时仍在 running(原 5x5s=25s 在轮询+模型生成耗时下会提前 completed)
+  // 12 x 5s = 60s, ensures job_list still sees running (previously 5x5s=25s completed early due to polling + model generation time)
   const CMD = 'for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo TICK-$i; sleep 5; done';
   let results = await poll('调用 bash 工具, run_in_background=true, command: ' + CMD + '。只调用这一次 bash, 不要调其它工具, 不要文字回复。');
   let r = findBy(results, 'bash', (x) => !x.isError && /started background job/.test(x.text));
@@ -215,7 +218,7 @@ async function caseCleanup() {
   record(9, '清理 e2e 产物(保留目录)', !!r && dirKept, r ? (dirKept ? '目录保留, 产物已删' : '目录内容异常') : '清理 bash 未成功');
 }
 
-// ---- 主流程 ----
+// ---- Main flow ----
 const cases = [
   ['1', caseBashFront], ['2', caseWrite], ['3', caseRead], ['4', caseEdit],
   ['5', caseGlob], ['6', caseGrep], ['7', caseBgChain], ['9', caseCleanup],
@@ -224,7 +227,7 @@ for (const [no, fn] of cases) {
   try { await fn(); } catch (err) { record(Number(no), '用例' + no, false, '异常: ' + String((err && err.message) || err).slice(0, 120)); }
 }
 
-// ---- 汇总 ----
+// ---- Summary ----
 const maxLen = Math.max(...rows.map((r) => r.desc.length), 1);
 console.log('\n===== 3080 全工具 E2E 汇总 =====');
 for (const r of rows) {

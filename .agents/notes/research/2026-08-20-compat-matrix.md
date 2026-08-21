@@ -1,15 +1,15 @@
 # dsh-ssh 兼容性矩阵与真实远端实测报告
 
 > 生成: 2026-08-16 · 实测套件: packages/dsh-ssh/scripts/functional-live-test.mjs(41 用例)
-> 数据来源: 套件 RESULT-JSON 输出(可复跑复现)。两远端均为真实公网主机, 公钥认证, 全程 ssh2 v1.17.0。
-> 约束遵守: 纯内存配置(不写 ~/.dsh/settings.yaml); known_hosts 用 /tmp/dssh-test-known_hosts(不碰用户文件,
+> 数据来源: 套件 RESULT-JSON 输出(可复跑复现)。两远端地址已脱敏为 RFC 5737 示例占位(见文末脚注), 环境指纹为实测记录; 公钥认证, 全程 ssh2 v1.17.0。
+> 约束遵守: 纯内存配置(不写 ~/.dsh/settings.yaml); known_hosts 用 /tmp/dsh-ssh-test-known_hosts(不碰用户文件,
 > acceptNew 仅套件兜底); 远端只碰 /tmp 下自建目录并已清理(实测无残留); 未启动任何 DSH 服务; 未改任何现有代码。
 
 ## 1. 实测环境信息
 
-| 项 | ubuntu-22(主) | macOS-16611(次) |
+| 项 | ubuntu-22(主) | macOS(次) |
 |---|---|---|
-| 主机 | ubuntu@203.0.113.10:22 | haowu@203.0.113.10:16611 |
+| 主机 | ubuntu@203.0.113.10:22[^1] | user@203.0.113.10:<ssh-port>[^1] |
 | OpenSSH 版本 | 8.9p1 Ubuntu-3ubuntu0.6 / OpenSSL 3.0.2 | 10.2p1 / LibreSSL 3.3.6 |
 | 内核 | Linux 5.15.0-106-generic x86_64 | Darwin 25.5.0 arm64 |
 | 默认 shell | /bin/bash | /bin/zsh |
@@ -17,7 +17,7 @@
 | ssh2 版本 | 1.17.0(本地依赖, 两主机同一客户端) | 同左 |
 
 认证方式: 密钥路径 ~/.ssh/id_ed25519 ✅(全部用例); agent 认证未测(本机 SSH_AUTH_SOCK 已设置但未走 agent); 口令认证未测。
-known_hosts 校验: 两主机 key 均在 /tmp/dssh-test-known_hosts(实测 host:port 与 [host]:port 两种 pattern 均可匹配)。
+known_hosts 校验: 两主机 key 均在 /tmp/dsh-ssh-test-known_hosts(实测 host:port 与 [host]:port 两种 pattern 均可匹配)。
 
 ## 2. 用例清单(41 用例: 39 ✅ / 2 ❌ 均带 [KNOWN-BUG] 标记)
 
@@ -67,7 +67,7 @@ known_hosts 校验: 两主机 key 均在 /tmp/dssh-test-known_hosts(实测 host:
 
 ## 3. 兼容性矩阵(能力 × 环境)
 
-| 能力 | ubuntu-22 | macOS-16611 |
+| 能力 | ubuntu-22 | macOS(次) |
 |---|---|---|
 | exec 退出码/stdout/stderr | 实测✅ A1-1/2 | 实测✅ A1-7 |
 | exec 大输出 | 实测✅ A1-3 | 未测(同 exec 通道, 依赖度低) |
@@ -110,10 +110,12 @@ known_hosts 校验: 两主机 key 均在 /tmp/dssh-test-known_hosts(实测 host:
 - P4(轻微) 远端断开后 exec 报裸 Error "Not connected"(ssh2 对已断开 client 同步抛错), 未转 SshError。A3-3 记录。
 - P5(观察) ssh2 v1.17 sftp.extensions 实测为 undefined → writeFileAtomic 覆盖写恒走 rename+unlink 回退(存在极小非原子窗口), posix-rename 分支实际不可达。A2-2 记录。
 - P6(观察) maxConnections 只限制并发建立连接(排队), 不淘汰已缓存连接: 8 个不同 hostId 全排队成功后 conns.size=8。A4-2 记录。
-- P7(前提纠正) macOS-16611 主机 SFTP 实测可用(sshd_config.d/100-macos.conf 显式启用了 Subsystem sftp),"SFTP 被禁"前提不成立; SFTP 不可用降级路径改用 mock conn.sftp 抛错验证(B10-3), 文案完整。
+- P7(前提纠正) macOS(次) 主机 SFTP 实测可用(sshd_config.d/100-macos.conf 显式启用了 Subsystem sftp),"SFTP 被禁"前提不成立; SFTP 不可用降级路径改用 mock conn.sftp 抛错验证(B10-3), 文案完整。
 - P8(说明) 套件当前 2 项红均为 P1 的 [KNOWN-BUG] 标记; P1 修复后应全绿输出 FUNCTIONAL-LIVE-TEST-OK。
 
 ## 5. 复跑方式
 
 cd packages/dsh-ssh && node scripts/functional-live-test.mjs
-环境: DSSH_TEST_KEY_PATH 可覆盖密钥路径; 输出含每用例 PASS/FAIL、汇总表、RESULT-JSON; 任一 FAIL 退出码 1。
+环境: DSH_SSH_TEST_KEY_PATH 可覆盖密钥路径; 输出含每用例 PASS/FAIL、汇总表、RESULT-JSON; 任一 FAIL 退出码 1。
+
+[^1]: RFC 5737 示例地址，非真实主机；端口为占位符。

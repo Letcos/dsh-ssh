@@ -21,4 +21,4 @@ Status: implemented
 
 ## 出处
 - archived/a-series-log.md A.19(PTC/code-mode 审计)、A.25(skill/MCP 行为调研)、A.26(方案 A+C 收口实施)。
-- dsh-skill-filesystem/lib/index.js roots/readSkillText;dsh-tool-skill/lib/index.js;dsh-mcp-client/lib/index.js Stdio/HTTP transport;dsh-system-prompt/lib/index.js section 注册;dsh-tools createRunCodeTool;research/remote-capability-competitors.md。
+- dsh-skill-filesystem/lib/index.js roots/readSkillText;dsh-tool-skill/lib/index.js;dsh-mcp-client/lib/index.js Stdio/HTTP transport;dsh-system-prompt/lib/index.js section 注册;dsh-tools createRunCodeTool;research/2026-08-20-remote-capability-competitors.md。

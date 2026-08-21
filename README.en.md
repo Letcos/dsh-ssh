@@ -20,6 +20,19 @@ Run your DeepSeek Harness workspace on any remote machine over SSH — right fro
 >
 > Built entirely on DSH's official public contract for third-party plugins — purely additive, zero changes to DSH core, and zero installation on the remote (it only needs a plain `sshd`). Remove it and DSH is exactly as it was. Your local workspaces behave byte-for-byte identically to before.
 
+## Table of Contents
+
+- [Features](#features)
+- [Install](#install)
+- [Quickstart (30 seconds)](#quickstart-30-seconds)
+- [What runs where](#what-runs-where)
+- [Compatibility](#compatibility)
+- [Known limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Development](#development)
+- [License](#license)
+
 ## Features
 
 - **SSH hosts in Settings**: add / edit / delete hosts (host, port, user, key or password) right in the DSH settings page, with a one-click connection test.
@@ -61,10 +74,12 @@ In a remote workspace, only the seven routed tools execute on the remote host:
 | Dimension | Status |
 |---|---|
 | Remote OS | Ubuntu ✅ · macOS ✅ (tested against real hosts) |
-| Authentication | Key-based ✅ |
+| Authentication | Key-based ✅ · Password ✅ |
 | Remote needs | Plain `sshd` only — no agent, service, or kernel module |
 | Windows remote | Not supported (Linux / macOS only) |
 | Preset | Any preset, including the standard one — independent of presets |
+
+> **Requirements**: Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies (`@deepseek-ai/cordis@^4.0.1`, `@deepseek-ai/dsh-*@^0.1.0-rc.6`, `@deepseek-ai/schemastery@^3.18.1` — see `packages/dsh-ssh/package.json`)
 
 ## Known limitations
 
@@ -72,6 +87,15 @@ In a remote workspace, only the seven routed tools execute on the remote host:
 - Remote `grep` uses GNU grep; ignore rules differ slightly from `rg`.
 - If SFTP is disabled on the remote, file operations automatically fall back to `exec` + base64 (works, but slower).
 - Windows remote hosts are not supported.
+
+## Troubleshooting
+
+- **Cannot connect / Test connection fails**: check host / port / user, firewall for port 22, whether `sshd` is running, and auth (key path / password); the Settings → *Test connection* does a real handshake + `echo`, and errors include hostId and remote output.
+- **Fingerprint mismatch / TOFU verification fails**: the first connection shows a fingerprint popup (TOFU) and writes to `known_hosts` once confirmed; `host key changed` means the remote was reinstalled or a MITM risk — verify and then remove the stale `known_hosts` entry or re-trust.
+- **Private key permission error (UNPROTECTED PRIVATE KEY)**: OpenSSH requires `600`/`400` (no group/other read); fix file permissions and path (avoid spaces or CJK characters), and ensure DSH can read it.
+- **SFTP disabled → falls back to exec + base64 (slower)**: if the remote disables SFTP, file ops still work via exec-channel base64 (ExecFs) but large / batch ops are noticeably slower — expected degradation; enable the SFTP subsystem in `sshd_config` to restore speed.
+- **Placeholder directory (`~/.dsh/remote/<hostId>/...`)**: a remote workspace is just a local placeholder (plain workspace record, `workspaceRegistry` does `realpath` check); it holds no business data but must exist and must not be a symlink — do not delete/move it manually, switch via DSH workspace management.
+- **How to collect logs**: tool failures include hostId, the exact remote command, exit code and tail output; combine with `~/.dsh/settings.yaml` (`dsh-ssh-hosts`), DSH console logs, and remote `sshd` logs (`/var/log/auth.log` or `journalctl -u sshd`) and attach sanitized info when filing an issue.
 
 ## FAQ
 
@@ -95,7 +119,9 @@ DSH is fully restored — no trace left behind.
 
 ## Development
 
-This repository is a pnpm workspace; developer-oriented documentation lives in `packages/dsh-ssh/`. See [packages/dsh-ssh/CONTRIBUTING.md](./packages/dsh-ssh/CONTRIBUTING.md) for the package layout, tests, and live verification scripts.
+This repository is a pnpm workspace; developer-oriented documentation lives in the root [CONTRIBUTING.md](./CONTRIBUTING.md). See [CONTRIBUTING.md](./CONTRIBUTING.md) for the package layout, tests, and live verification scripts.
+
+> **Navigation**: Agent entry → [AGENTS.md](./AGENTS.md) · Developer handbook → [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## License
 

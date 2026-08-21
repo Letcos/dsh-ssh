@@ -104,11 +104,8 @@ test('pool acquire after close invalidates and creates fresh SshConn', async () 
   client1.emit('close');
   assert.equal(conn1._dead, true);
   // Next acquire should invalidate old and create new conn
-  // Stub SshConn creation by mocking pool's internal new SshConn via overriding connect plumbing:
-  // We let pool create a new SshConn; stub its _connectInner to succeed
-  const originalSshConn = SshConn;
-  // Instead, we test the pool logic: acquire should detect _dead and call invalidate
-  // To avoid real network, we temporarily replace SshConn.prototype._connectInner for the new instance
+  // Test the pool logic: acquire should detect _dead and call invalidate.
+  // To avoid real network, temporarily replace SshConn.prototype._connectInner for the new instance.
   const newClient = makeFakeClient();
   let newConnectCalled = false;
   // Monkey patch SshConn _connectInner for any new instance created inside acquire

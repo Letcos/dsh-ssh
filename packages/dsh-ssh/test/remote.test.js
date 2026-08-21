@@ -1,6 +1,6 @@
-// @dsh-ssh/dsh-ssh — functional unit test of the host Typert remote service (M2b).
+// @dsh-ssh/dsh-ssh — functional unit test of the host Typert remote service.
 // Requires the peer deps installed by pnpm install (cordis + typert-protocol
-// live under packages/@dsh-ssh/dsh-ssh/node_modules). Verifies the service registers a
+// live under packages/dsh-ssh/node_modules). Verifies the service registers a
 // visible typertRemote binding and that testConnection merges stored secrets
 // before delegating to the pool.
 import { test } from 'node:test';
@@ -31,7 +31,7 @@ test('SshRemoteService registers a typertRemote binding for namespace ssh', () =
 });
 
 test('remoteMethods on the plain-JS service is empty (no decorators) — strict contribution carries the endpoint', () => {
-  // M2b chose the strict-registry route (ctx.typert.register) over SRC decorators,
+  // Uses the strict-registry route (ctx.typert.register) over SRC decorators,
   // so the endpoint identity comes from HOST_TYPERT_CONTRIBUTION, not decorator markers.
   const ctx = new Context();
   const pool = { testConnection: async () => ({ ok: false, error: 'x' }) };
@@ -92,7 +92,7 @@ test('bindTypertRemote is the exact binding shape the gateway validates', () => 
   assert.equal(binding.namespace, 'ssh');
 });
 
-// ---------- A.7: F1 CRUD over the Typert channel (settings wire not exposed) ----------
+// ---------- CRUD over the Typert channel (settings wire not exposed) ----------
 
 /** Minimal settings provider double: get/describe/writable/mutate with revision semantics. */
 function makeSettings(initialHosts, legacyHosts) {
@@ -253,11 +253,11 @@ test('saveHost throws a clear error when no settings service is wired', async ()
   ctx.dispose?.();
 });
 
-// ---------- M4: 远端目录浏览 + 占位目录创建 ----------
+// ---------- Remote directory browse + placeholder creation ----------
 
 const M4_HOST = { id: 'h1', host: 'h', port: 22, user: 'u', auth: { type: 'key' } };
 
-/** 连接池双: acquire 捕获收到的(STORED)配置, 返回固定 conn 双。 */
+/** Fake connection pool: acquire captures received (STORED) config, returns fixed conn. */
 function makeBrowsePool(conn, onAcquire) {
   return {
     acquire: async (cfg) => { if (onAcquire) onAcquire(cfg); return conn; },
@@ -265,7 +265,7 @@ function makeBrowsePool(conn, onAcquire) {
   };
 }
 
-/** 带 settings + stored resolver 的服务(connection 类端点走 resolveStored, 占位走 settingsApi)。 */
+/** Service with settings + stored resolver (connection endpoints use resolveStored, placeholder uses settingsApi). */
 function makeBrowseService(pool, settings, stored) {
   const ctx = new Context();
   const svc = new SshRemoteService(ctx, pool ?? { testConnection: async () => ({ ok: false, error: 'x' }) });
@@ -287,7 +287,7 @@ test('listRemoteDir lists via SFTP and sorts directories first, then by name', a
   const result = await svc.listRemoteDir('h1', '/data');
   assert.deepEqual(result.map((e) => e.name), ['Gamma', 'alpha', 'beta.txt', 'zeta.txt']);
   assert.equal(result[0].type, 'dir');
-  assert.deepEqual(acquired, { ...M4_HOST, id: 'h1' }); // acquire 走 STORED 配置
+  assert.deepEqual(acquired, { ...M4_HOST, id: 'h1' }); // acquire uses STORED config
   ctx.dispose?.();
 });
 
@@ -303,7 +303,7 @@ test('statRemote reads raw SFTP stat with mtime; ENOENT maps to null', async () 
   const conn = { sftp: async () => ({ listDir: async () => [] }), fs: async () => ({ stat: async () => ({ type: 'directory', size: 42, mtime: 1234 }) }), exec: async () => ({ code: 0, stdout: '', stderr: '' }) };
   const { ctx, svc } = makeBrowseService(makeBrowsePool(conn), makeSettings({ h1: M4_HOST }), { h1: M4_HOST });
   assert.deepEqual(await svc.statRemote('h1', '/data'), { type: 'directory', size: 42, mtime: 1234 });
-  // ENOENT(ssh2 用 code 2)→ null
+  // ENOENT (ssh2 code 2) -> null
   const missingConn = { sftp: async () => ({ listDir: async () => [] }), fs: async () => ({ stat: async () => undefined }), exec: async () => ({ code: 0, stdout: '', stderr: '' }) };
   const svc2 = makeBrowseService(makeBrowsePool(missingConn), makeSettings({ h1: M4_HOST }), { h1: M4_HOST }).svc;
   assert.equal(await svc2.statRemote('h1', '/nope'), null);
@@ -311,11 +311,11 @@ test('statRemote reads raw SFTP stat with mtime; ENOENT maps to null', async () 
 });
 
 test('resolveRemoteHome execs echo $HOME and returns the absolute home', async () => {
-  const exec = async () => ({ code: 0, stdout: '/home/ubuntu\n', stderr: '' });
+  const exec = async () => ({ code: 0, stdout: '/home/devuser\n', stderr: '' });
   const conn = { sftp: async () => ({ listDir: async () => [] }), exec };
   const { ctx, svc } = makeBrowseService(makeBrowsePool(conn), makeSettings({ h1: M4_HOST }), { h1: M4_HOST });
-  assert.equal(await svc.resolveRemoteHome('h1'), '/home/ubuntu');
-  // exec 失败 → SshError(stage exec)
+  assert.equal(await svc.resolveRemoteHome('h1'), '/home/devuser');
+  // exec failure -> SshError(stage exec)
   const badExec = async () => ({ code: 127, stdout: '', stderr: 'command not found' });
   const svc2 = makeBrowseService(makeBrowsePool({ sftp: async () => ({ listDir: async () => [] }), exec: badExec }), makeSettings({ h1: M4_HOST }), { h1: M4_HOST }).svc;
   await assert.rejects(() => svc2.resolveRemoteHome('h1'), (err) => err instanceof SshError && err.stage === 'exec' && /exit 127/.test(err.message));
@@ -336,14 +336,14 @@ test('createPlaceholder validates the host in dsh-ssh-hosts and creates a real d
     assert.ok(result.localPath.startsWith(tmp + pathMod.sep + 'remote' + pathMod.sep));
     assert.equal(result.localPath, pathMod.join(tmp, 'remote', 'h1', encodeRemotePath('/data/work')));
     assert.equal(fsMod.statSync(result.localPath).isDirectory(), true);
-    // 真实目录, 非符号链接(macOS /var→/private 与 canonical 逻辑路径比较)
+    // Real directory, not symlink (macOS /var -> /private canonical comparison)
     assert.equal(
       fsMod.realpathSync(result.localPath),
       pathMod.join(fsMod.realpathSync(tmp), 'remote', 'h1', encodeRemotePath('/data/work')),
     );
-    // 幂等
+    // Idempotent
     assert.deepEqual(await svc.createPlaceholder('h1', '/data/work'), result);
-    // 未配置的主机 / 相对路径 → SshError
+    // Unconfigured host / relative path -> SshError
     await assert.rejects(() => svc.createPlaceholder('nope', '/x'), (err) => err instanceof SshError && err.stage === 'placeholder' && /not configured/.test(err.message));
     await assert.rejects(() => svc.createPlaceholder('h1', 'rel'), (err) => err instanceof SshError && err.stage === 'placeholder' && /must be absolute/.test(err.message));
     ctx.dispose?.();
@@ -352,7 +352,7 @@ test('createPlaceholder validates the host in dsh-ssh-hosts and creates a real d
   }
 });
 
-test('createPlaceholder 显式 registry: 工作区记录 title = 主机显示名 / basename (A.29 修订; name 缺失回退 hostId)', async () => {
+test('createPlaceholder explicit registry: workspace title = host display name / basename (fallback to hostId when name missing)', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -368,18 +368,18 @@ test('createPlaceholder 显式 registry: 工作区记录 title = 主机显示名
     const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: M4_HOST }), {});
     svc.env = { DSH_HOME: tmp };
     svc.setWorkspaceRegistry(() => registry);
-    const result = await svc.createPlaceholder('h1', '/home/ubuntu/opencode-api');
+    const result = await svc.createPlaceholder('h1', '/home/devuser/workspace');
     assert.equal(creates.length, 1);
     assert.equal(creates[0].path, result.localPath);
-    // M4_HOST 无 name → 主机显示名回退 hostId 'h1': 标题 = h1 / opencode-api
-    assert.equal(creates[0].title, 'h1 / opencode-api');
+    // M4_HOST has no name -> display falls back to hostId 'h1': title = h1 / workspace
+    assert.equal(creates[0].title, 'h1 / workspace');
     ctx.dispose?.();
   } finally {
     fsMod.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('createPlaceholder 自动修复历史 base64 title → 主机名 / basename, 用户改过的 title 不动 (A.15 + A.29 修订)', async () => {
+test('createPlaceholder auto-fixes legacy base64 title to host name / basename, preserves user-edited title', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -387,7 +387,7 @@ test('createPlaceholder 自动修复历史 base64 title → 主机名 / basename
   try {
     const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: M4_HOST }), {});
     svc.env = { DSH_HOME: tmp };
-    // 旧 bug 产物: 记录 title 恰为编码段 → 自动重命名为 basename
+    // Legacy bug: title equals encoded segment -> auto-rename to basename
     const renames = [];
     svc.setWorkspaceRegistry(() => ({
       create: async (path, title) => ({
@@ -396,9 +396,9 @@ test('createPlaceholder 自动修复历史 base64 title → 主机名 / basename
       }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
-    // M4_HOST 无 name → 主机显示名回退 'h1': base64 编码段升级为 h1 / work
+    // M4_HOST has no name -> display falls back to 'h1': encoded segment upgrades to h1 / work
     assert.deepEqual(renames, ['h1 / work']);
-    // 用户手动改过的 title(非编码段) → 不动
+    // User-edited title (non-encoded) -> untouched
     const renames2 = [];
     svc.setWorkspaceRegistry(() => ({
       create: async () => ({
@@ -414,7 +414,7 @@ test('createPlaceholder 自动修复历史 base64 title → 主机名 / basename
   }
 });
 
-test('createPlaceholder 标题用主机 name(有 name 时), 不再回退 hostId (A.29)', async () => {
+test('createPlaceholder title uses host name when present, no fallback to hostId', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -422,36 +422,36 @@ test('createPlaceholder 标题用主机 name(有 name 时), 不再回退 hostId 
   try {
     const creates = [];
     const registry = { create: async (path, title) => { creates.push({ path, title }); return { title, setTitle: async () => {} }; } };
-    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'ubuntu' } }), {});
+    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'devuser' } }), {});
     svc.env = { DSH_HOME: tmp };
     svc.setWorkspaceRegistry(() => registry);
-    await svc.createPlaceholder('h1', '/home/ubuntu/opencode-api');
-    assert.equal(creates[0].title, 'ubuntu / opencode-api');
+    await svc.createPlaceholder('h1', '/home/devuser/workspace');
+    assert.equal(creates[0].title, 'devuser / workspace');
     ctx.dispose?.();
   } finally {
     fsMod.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('createPlaceholder 迁移 A.15 纯 basename 记录 → 主机名 / basename; 幂等 (A.29 修订)', async () => {
+test('createPlaceholder migrates legacy plain basename to host name / basename; idempotent', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
   const tmp = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'dsh-m4-svc-'));
   try {
-    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'ubuntu' } }), {});
+    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'devuser' } }), {});
     svc.env = { DSH_HOME: tmp };
-    // A.15 产物: title 恰为纯 basename(无主机标识) → 升级为主机格式
+    // Legacy: title equals plain basename (no host identifier) -> upgrade to host format
     const renames = [];
     svc.setWorkspaceRegistry(() => ({
       create: async () => ({ title: 'work', setTitle: async (t) => { renames.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
-    assert.deepEqual(renames, ['ubuntu / work']);
-    // 幂等: 已是新格式 → 不再 setTitle
+    assert.deepEqual(renames, ['devuser / work']);
+    // Idempotent: already new format -> no setTitle
     const renames2 = [];
     svc.setWorkspaceRegistry(() => ({
-      create: async () => ({ title: 'ubuntu / work', setTitle: async (t) => { renames2.push(t); } }),
+      create: async () => ({ title: 'devuser / work', setTitle: async (t) => { renames2.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
     assert.deepEqual(renames2, []);
@@ -461,15 +461,15 @@ test('createPlaceholder 迁移 A.15 纯 basename 记录 → 主机名 / basename
   }
 });
 
-test('createPlaceholder 已含主机标识的用户定制标题不被强行改写 (A.29 安全)', async () => {
+test('createPlaceholder preserves user custom title containing host identifier, does not overwrite', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
   const tmp = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'dsh-m4-svc-'));
   try {
-    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'ubuntu' } }), {});
+    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'devuser' } }), {});
     svc.env = { DSH_HOME: tmp };
-    // 用户手工命名成带主机标识的个性化标题(与当前主机格式不同) → 不动
+    // User manually named title with host identifier (different from current format) -> untouched
     const renames = [];
     svc.setWorkspaceRegistry(() => ({
       create: async () => ({ title: 'work · my-note', setTitle: async (t) => { renames.push(t); } }),
@@ -482,25 +482,25 @@ test('createPlaceholder 已含主机标识的用户定制标题不被强行改�
   }
 });
 
-test('createPlaceholder 迁移 A.29 旧格式 `basename · 主机名` → 新格式 `主机名 / basename`', async () => {
+test('createPlaceholder migrates legacy `basename · host` format to `host / basename`', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
   const tmp = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'dsh-m4-svc-'));
   try {
-    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'ubuntu' } }), {});
+    const { ctx, svc } = makeBrowseService(null, makeSettings({ h1: { ...M4_HOST, name: 'devuser' } }), {});
     svc.env = { DSH_HOME: tmp };
-    // 旧 A.29 自动标题 `work · ubuntu`(hostName=ubuntu) → 升级为新格式
+    // Legacy auto title `work · devuser` (hostName=devuser) -> upgrade to new format
     const renames = [];
     svc.setWorkspaceRegistry(() => ({
-      create: async () => ({ title: 'work · ubuntu', setTitle: async (t) => { renames.push(t); } }),
+      create: async () => ({ title: 'work · devuser', setTitle: async (t) => { renames.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
-    assert.deepEqual(renames, ['ubuntu / work']);
-    // 已是新格式 → 幂等无操作
+    assert.deepEqual(renames, ['devuser / work']);
+    // Already new format -> idempotent no-op
     const renames2 = [];
     svc.setWorkspaceRegistry(() => ({
-      create: async () => ({ title: 'ubuntu / work', setTitle: async (t) => { renames2.push(t); } }),
+      create: async () => ({ title: 'devuser / work', setTitle: async (t) => { renames2.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
     assert.deepEqual(renames2, []);
@@ -510,7 +510,7 @@ test('createPlaceholder 迁移 A.29 旧格式 `basename · 主机名` → 新格
   }
 });
 
-test('createPlaceholder registry 失败 → SshError(stage placeholder), 不静默降级 (A.15)', async () => {
+test('createPlaceholder registry failure -> SshError(stage placeholder), no silent fallback', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -541,7 +541,7 @@ test('trustHostKey appends the confirmed key to a temp known_hosts, idempotently
     svc.setStoredResolver((id) => (id === 'h1' ? {
       id: 'h1', host: 'tofu.example', port: 2222, user: 'u', auth: { type: 'key' }, knownHostsPath: kh,
     } : undefined));
-    // 构造一枚带算法前缀的 raw host key blob(与 ssh2 hostVerifier 收到的形态一致)
+    // Build a raw host key blob with algorithm prefix (matches ssh2 hostVerifier shape)
     const algo = 'ssh-ed25519';
     const pre = Buffer.alloc(4); pre.writeUInt32BE(algo.length, 0);
     const blob = Buffer.concat([pre, Buffer.from(algo), Buffer.from('pubkey-bytes-here')]);
@@ -553,12 +553,12 @@ test('trustHostKey appends the confirmed key to a temp known_hosts, idempotently
     assert.equal(first.appended, true);
     assert.equal(first.keyType, 'ssh-ed25519');
     assert.ok(readFileSync(kh, 'utf8').includes(knownHostsLine('tofu.example', 2222, keyType, b64)));
-    // 幂等
+    // Idempotent
     const second = await svc.trustHostKey('h1', b64, fp);
     assert.equal(second.appended, false);
-    // 指纹不符 → 拒绝写盘
+    // Fingerprint mismatch -> reject write
     await assert.rejects(() => svc.trustHostKey('h1', b64, 'SHA256:WRONG'), /does not match/);
-    // 主机未配置 → 拒绝
+    // Host not configured -> reject
     await assert.rejects(() => svc.trustHostKey('nope', b64, fp), /not configured/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

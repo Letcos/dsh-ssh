@@ -17,11 +17,7 @@ SSH 连接在网络抖动、keepalive 超时或远端 sshd 主动关闭后，`Ss
 ## Consequences
 - 长时间运行后的网络断开不再导致永久 `Not connected`；下一次工具调用自动重连并对 `exec`/`sftp` 的“未开始”阶段做一次透明重试。
 - 主动 `dispose/invalidate` 不会误触发重连；`fs()` 的 SFTP 降级探测仍按连接粒度缓存，重连后重新探测。
-- 新增单测覆盖闭环，基线 `fail=0` 不变。
-
-## Verification
-- 单测：`node --test packages/dsh-ssh/test/*.test.js` — `tests 295, pass 295, fail 0`（含新增 `packages/dsh-ssh/test/ssh-reconnect.test.js` 9 项：close 标记 dead/下次 connect 重建/pool acquire 失效重建/Not connected 单次重试成功(exec/sftp)/重连失败抛带 hostId 的 SshError(exec/sftp)/正常 dispose 不触发重连/非 Not connected 不重试）。
-- 静态自检：`node packages/dsh-ssh/scripts/client-selfcheck.mjs` — `client.js static self-check OK`。
+- 新增单测覆盖闭环，基线 `fail=0` 不变：`node --test packages/dsh-ssh/test/*.test.js` — `tests 295, pass 295, fail 0`（含新增 `packages/dsh-ssh/test/ssh-reconnect.test.js` 9 项：close 标记 dead/下次 connect 重建/pool acquire 失效重建/Not connected 单次重试成功(exec/sftp)/重连失败抛带 hostId 的 SshError(exec/sftp)/正常 dispose 不触发重连/非 Not connected 不重试）；`node packages/dsh-ssh/scripts/client-selfcheck.mjs` — `client.js static self-check OK`。
 
 ## 出处
 - `packages/dsh-ssh/src/ssh-core.js`：`SshConn` `_dead/_isClosing/_onClose/_resetDeadState/connect/_connectInner/_close/_ensureOpen/_doExecChannel/_execChannel/_doSftpOpen/sftp`、`SshPool.acquire`、`isNotConnectedError`。

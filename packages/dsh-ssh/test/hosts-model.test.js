@@ -1,4 +1,4 @@
-// @dsh-ssh/dsh-ssh — pure-model unit tests (M2b). Run: node --test 'packages/@dsh-ssh/dsh-ssh/test/*.test.js'
+// @dsh-ssh/dsh-ssh — pure-model unit tests. Run: node --test 'packages/dsh-ssh/test/*.test.js'
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -27,7 +27,7 @@ test('validateHostForm: required fields and whitespace rule', () => {
   assert.ok(empty.errors.host);
   assert.ok(empty.errors.user);
 
-  const ok = validateHostForm({ name: ' box ', host: '192.168.1.1', port: '22', user: 'root' });
+  const ok = validateHostForm({ name: ' box ', host: '203.0.113.10', port: '22', user: 'root' });
   assert.equal(ok.ok, true);
   assert.equal(ok.value.name, 'box');
   assert.equal(ok.value.port, 22);
@@ -80,7 +80,7 @@ test('secretPathFor / isHostSecretSet', () => {
 });
 
 test('sortedHosts: sorts by title, preserves id', () => {
-  const hosts = { b: { id: 'b', name: 'Beta', host: '1.1.1.1' }, a: { id: 'a', name: 'alpha', host: '2.2.2.2' } };
+  const hosts = { b: { id: 'b', name: 'Beta', host: '198.51.100.1' }, a: { id: 'a', name: 'alpha', host: '198.51.100.2' } };
   const list = sortedHosts(hosts);
   assert.deepEqual(list.map((h) => h.id), ['a', 'b']);
   assert.equal(sortedHosts(null).length, 0);
@@ -193,7 +193,7 @@ test('mergeTestConfig: defaults when no stored host', () => {
 });
 
 test('display helpers and messageOf', () => {
-  assert.equal(displayHostTitle({ id: 'x', host: '1.2.3.4' }), '1.2.3.4 (x)');
+  assert.equal(displayHostTitle({ id: 'x', host: '203.0.113.10' }), '203.0.113.10 (x)');
   assert.equal(displayHostTitle({ id: 'x', name: 'Box' }), 'Box');
   assert.equal(displayAuthType({ auth: { type: 'password' } }), 'password');
   assert.equal(displayAuthType({ auth: { type: 'key' } }), 'key');
