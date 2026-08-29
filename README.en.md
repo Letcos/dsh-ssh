@@ -49,7 +49,9 @@ Run your DeepSeek Harness workspace on any remote machine over SSH — right fro
 ```bash
 dsh plugin --profile web add @dsh-ssh/dsh-ssh
 ```
-If pnpm reports `ERR_PNPM_ADDING_TO_ROOT`, append `-w` (profile dirs are pnpm workspace roots and pnpm 11 requires the flag). A failed `cpu-features` build log during install is expected — it is an optional native accelerator and falls back to pure JS.
+If pnpm reports `ERR_PNPM_ADDING_TO_ROOT`, append `-w` (profile dirs are pnpm workspace roots and pnpm 11 requires the flag).
+
+pnpm 11 blocks the build scripts of `ssh2` and its optional native accelerator `cpu-features`, so the install may end with `ERR_PNPM_IGNORED_BUILDS` (listing `cpu-features`, `ssh2`). Neither needs to build — `cpu-features` is only an optional native crypto accelerator and falls back to pure JS when skipped. Unblock, then reinstall: run `pnpm approve-builds` in the profile directory and choose to skip both, or edit the profile's `pnpm-workspace.yaml` to add `allowBuilds: { cpu-features: false, ssh2: false }`.
 
 Restart DSH, then open the settings page and add your first host.
 
@@ -79,7 +81,7 @@ In a remote workspace, only the seven routed tools execute on the remote host:
 | Windows remote | Not supported (Linux / macOS only) |
 | Preset | Any preset, including the standard one — independent of presets |
 
-> **Requirements**: Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies (`@deepseek-ai/cordis@^4.0.1`, `@deepseek-ai/dsh-*@^0.1.0-rc.6`, `@deepseek-ai/schemastery@^3.18.1` — see `packages/dsh-ssh/package.json`)
+> **Requirements**: Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies (`@deepseek-ai/cordis@^4.0.1`, `@deepseek-ai/dsh-*@^0.1.1-rc.2`, `@deepseek-ai/schemastery@^3.18.1` — see `packages/dsh-ssh/package.json`)
 
 ## Known limitations
 

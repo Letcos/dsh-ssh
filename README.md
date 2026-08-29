@@ -49,7 +49,9 @@
 ```bash
 dsh plugin --profile web add @dsh-ssh/dsh-ssh
 ```
-若 pnpm 报 `ERR_PNPM_ADDING_TO_ROOT`，在命令末尾加 `-w`（profile 目录是 pnpm workspace 根，pnpm 11 需要显式允许）。安装时若看到 `cpu-features` 编译失败的日志属正常——它是可选的原生加速依赖，失败会自动回退纯 JS 实现，不影响功能。
+若 pnpm 报 `ERR_PNPM_ADDING_TO_ROOT`，在命令末尾加 `-w`（profile 目录是 pnpm workspace 根，pnpm 11 需要显式允许）。
+
+pnpm 11 会拦截 `ssh2` 及其可选原生加速依赖 `cpu-features` 的构建脚本，安装可能以 `ERR_PNPM_IGNORED_BUILDS`（列出 `cpu-features`、`ssh2`）收尾。二者都**无需构建**——`cpu-features` 仅是可选的原生加密加速，跳过即自动回退纯 JS 实现，功能不变。解除拦截后重新安装：在 profile 目录执行 `pnpm approve-builds` 把两个包都选为跳过，或编辑 profile 的 `pnpm-workspace.yaml` 加入 `allowBuilds: { cpu-features: false, ssh2: false }`。
 
 重启 DSH，在设置页添加你的第一台主机。
 
@@ -79,7 +81,7 @@ dsh plugin --profile web add @dsh-ssh/dsh-ssh
 | Windows 远端 | 不支持（仅 Linux / macOS） |
 | Preset | 任意 preset 均可，含 standard；与 preset 无关 |
 
-> **版本要求**：Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies（`@deepseek-ai/cordis@^4.0.1`、`@deepseek-ai/dsh-*@^0.1.0-rc.6`、`@deepseek-ai/schemastery@^3.18.1`，详见 `packages/dsh-ssh/package.json`）
+> **版本要求**：Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies（`@deepseek-ai/cordis@^4.0.1`、`@deepseek-ai/dsh-*@^0.1.1-rc.2`、`@deepseek-ai/schemastery@^3.18.1`，详见 `packages/dsh-ssh/package.json`）
 
 ## 已知限制
 
