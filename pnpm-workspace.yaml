@@ -1,5 +1,9 @@
 packages:
   - packages/*
+# ssh2's cpu-features dependency is an OPTIONAL native crypto accelerator
+# (AES-NI etc.). Skipping its node-gyp build is safe: ssh2 falls back to pure-JS
+# crypto, and this also removes the hard requirement for a native toolchain
+# (Visual Studio Build Tools / gcc) at install time.
 allowBuilds:
-  cpu-features: true
-  ssh2: true
+  cpu-features: false
+  ssh2: false
