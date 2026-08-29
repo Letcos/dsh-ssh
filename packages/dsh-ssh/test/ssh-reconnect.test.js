@@ -26,6 +26,7 @@ function makeFakeClient() {
     end() {},
     exec(cmd, cb) { cb(null, fakeStream()); },
     sftp(cb) { cb(null, {}); },
+    shell(wnd, cb) { cb(null, { window: wnd }); },
     _handlers: handlers,
   };
 }
@@ -175,6 +176,39 @@ test('"Not connected" sftp failure triggers single retry and succeeds', async ()
   assert.equal(connectCalls, 1);
 });
 
+test('_doShellChannel opens a pty shell with the requested term/cols/rows', async () => {
+  const conn = new SshConn({ id: 'h-shell-open', host: '203.0.113.10', port: 22, user: 'u', acceptNew: true });
+  conn.client = makeFakeClient();
+  conn._ready = Promise.resolve(conn);
+  const stream = await conn._doShellChannel({ term: 'xterm', cols: 120, rows: 40 });
+  assert.deepEqual(stream.window, { term: 'xterm', cols: 120, rows: 40 });
+  const defaults = await conn._doShellChannel();
+  assert.deepEqual(defaults.window, { term: 'xterm-256color', cols: 80, rows: 24 });
+});
+
+test('"Not connected" shell failure triggers single retry and succeeds', async () => {
+  const conn = new SshConn({ id: 'h-shell-retry', host: '203.0.113.10', port: 22, user: 'u', acceptNew: true });
+  conn.client = makeFakeClient();
+  conn._ready = Promise.resolve(conn);
+  let connectCalls = 0;
+  conn._connectInner = async () => {
+    connectCalls++;
+    conn.client = makeFakeClient();
+    conn.client.on('close', conn._onClose);
+    return conn;
+  };
+  let doCalls = 0;
+  conn._doShellChannel = async () => {
+    doCalls++;
+    if (doCalls === 1) throw new SshError({ hostId: 'h-shell-retry', stage: 'shell-open', message: 'Not connected' });
+    return { dummy: true };
+  };
+  const stream = await conn.shell();
+  assert.ok(stream, 'retry should return stream');
+  assert.equal(doCalls, 2, 'should retry once');
+  assert.equal(connectCalls, 1, 'should reconnect once');
+});
+
 test('reconnect failure after Not connected throws SshError with hostId', async () => {
   const conn = new SshConn({ id: 'h-fail', host: '203.0.113.10', port: 22, user: 'u', acceptNew: true });
   conn.client = makeFakeClient();
@@ -204,6 +238,23 @@ test('reconnect failure for sftp throws SshError with hostId', async () => {
     assert.ok(e instanceof SshError);
     assert.equal(e.hostId, 'h-sftp-fail');
     assert.equal(e.stage, 'sftp-open');
+    assert.match(e.message, /reconnect failed/i);
+    return true;
+  });
+});
+
+test('reconnect failure for shell throws SshError with hostId', async () => {
+  const conn = new SshConn({ id: 'h-shell-fail', host: '203.0.113.10', port: 22, user: 'u', acceptNew: true });
+  conn.client = makeFakeClient();
+  conn._ready = Promise.resolve(conn);
+  conn._doShellChannel = async () => {
+    throw new SshError({ hostId: 'h-shell-fail', stage: 'shell-open', message: 'Not connected' });
+  };
+  stubConnectFail(conn, new SshError({ hostId: 'h-shell-fail', stage: 'connect', message: 'timeout' }));
+  await assert.rejects(() => conn.shell(), (e) => {
+    assert.ok(e instanceof SshError);
+    assert.equal(e.hostId, 'h-shell-fail');
+    assert.equal(e.stage, 'shell-open');
     assert.match(e.message, /reconnect failed/i);
     return true;
   });

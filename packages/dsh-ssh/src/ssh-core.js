@@ -489,6 +489,41 @@ export class SshConn {
     yield { exitCode };
   }
 
+  async _doShellChannel(opts = {}) {
+    this._ensureOpen();
+    return new Promise((resolve, reject) => {
+      try {
+        // ssh2 throws "Not connected" synchronously when the connection is dead — wrap in SshError
+        this.client.shell({ term: opts.term ?? 'xterm-256color', cols: opts.cols ?? 80, rows: opts.rows ?? 24 }, (err, stream) => {
+          if (err) reject(new SshError({ hostId: this.id, stage: 'shell-open', message: err.message, cause: err }));
+          else resolve(stream);
+        });
+      } catch (err) {
+        reject(new SshError({ hostId: this.id, stage: 'shell-open', message: err?.message ?? String(err), cause: err }));
+      }
+    });
+  }
+
+  // Interactive shell channel with a PTY, for consumers that need a live remote terminal.
+  // Same transparent-single-retry contract as _execChannel/sftp: a dropped connection is
+  // cleared, reconnected, and the open re-attempted once.
+  async shell(opts = {}) {
+    try {
+      await this.connect();
+      return await this._doShellChannel(opts);
+    } catch (err) {
+      if (!isNotConnectedError(err)) throw err;
+      this._dead = true;
+      this._resetDeadState();
+      try {
+        await this.connect();
+        return await this._doShellChannel(opts);
+      } catch (err2) {
+        throw new SshError({ hostId: this.id, stage: 'shell-open', message: 'reconnect failed after disconnect: ' + (err2?.message ?? String(err2)), cause: err2 });
+      }
+    }
+  }
+
   async _doSftpOpen() {
     this._ensureOpen();
     if (!this._sftpPromise) {

@@ -62,7 +62,7 @@
 - **FUSE 挂载**(sshfs/macFUSE 等本地内核扩展)——见 §3.3;
 - **透明替换所有会话的 fs/shell 服务**——只做工具层路由(§3.2);
 - **远端 LSP / 远端 agent / 进程守护 / 文件监听(watch)**;
-- **交互式远端终端(PTY 全屏应用)**——只保证非交互命令;
+- **交互式远端终端(PTY 全屏应用)**——dsh-ssh 自身工具仍只保证非交互命令; 另暴露 `SshConn.shell()`(ssh2 PTY 通道, 单次重连重试)供消费者(如 dsh-better-sidebar 终端)构建交互终端, 交互/全屏语义由消费者自担(见 `implemented/feature/2026-08-29-ssh-shell-channel.md`);
 - **Windows 远端完整支持 / 多跳代理(ProxyJump)**——优先 Linux/macOS; Windows 差异与 ProxyJump 视 M5 打磨结果文档化限制。
 
 ---
