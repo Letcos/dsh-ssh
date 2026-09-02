@@ -357,7 +357,7 @@ class RemoteDirectoryService {
 ### R7. 连接池并发上限
 - **风险**: 每个连接同时开多个 exec/SFTP 会撞 sshd 的 MaxSessions; 并发爆炸。
 - **影响**: 远端拒绝连接或会话异常。
-- **对策**: 池上限 maxConnections(默认 4)+ 通道排队; SFTP 通道每连接至多一个(串行化文件操作); 测试撞 MaxSessions 边界。
+- **对策**: 池上限 maxConnections(默认 4)+ 通道排队; SFTP 通道每连接至多一个(串行化文件操作); 测试撞 MaxSessions 边界。已落地: `SshConn` 每连接 FIFO 会话通道信号量(`maxChannelsPerConnection` 默认 6, 见 `implemented/bug-fix/2026-09-02-session-channel-limit.md`)。
 
 ### R8. 逐文件 SFTP 往返性能
 - **风险**: 大目录列举、批量 edit、glob 结果读取若逐文件往返, 延迟 × 文件数。

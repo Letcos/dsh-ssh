@@ -255,5 +255,5 @@ export function apply(ctx, config = {}) {
   registerRemote(ctx, svc);
   installPlaceholderCleanup(ctx);
   installToolRoutingHook(ctx);
-  ctx.logger.info('[@dsh-ssh/dsh-ssh] loaded: sshPool service (maxConnections=' + (config.maxConnections ?? 4) + ') + settings dsh-ssh-hosts + remote ssh/* + placeholder cleanup + agent/created tool routing');
+  ctx.logger.info('[@dsh-ssh/dsh-ssh] loaded: sshPool service (maxConnections=' + (config.maxConnections ?? 4) + ', maxChannelsPerConnection=' + (config.maxChannelsPerConnection ?? 6) + ') + settings dsh-ssh-hosts + remote ssh/* + placeholder cleanup + agent/created tool routing');
 }

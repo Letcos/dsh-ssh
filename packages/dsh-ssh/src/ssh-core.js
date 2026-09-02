@@ -48,6 +48,27 @@ function isNotConnectedError(err) {
   return msg.includes('Not connected');
 }
 
+// ssh2 surfaces an SSH_MSG_CHANNEL_OPEN_FAILURE as "(SSH) Channel open failure: <description>"
+// and attaches the numeric reason code (1..4) as err.reason. OpenSSH sends description
+// "open failed" with reason 1 (administratively prohibited) whenever it refuses a session
+// channel — most commonly because the per-connection MaxSessions (default 10) is exhausted
+// by too many concurrent channels. Surface the reason so the failure is diagnosable.
+const CHANNEL_OPEN_REASON_HINTS = {
+  1: 'administratively prohibited',
+  2: 'connect failed',
+  3: 'unknown channel type',
+  4: 'resource shortage',
+};
+function describeChannelOpenError(err) {
+  const msg = err?.message ?? String(err);
+  const reason = err && typeof err.reason === 'number' ? CHANNEL_OPEN_REASON_HINTS[err.reason] : undefined;
+  if (!reason) return msg;
+  if (err.reason === 1 && msg.includes('open failed')) {
+    return msg + ' (reason: ' + reason + '; the server refused a session channel — usually its per-connection MaxSessions limit was reached by concurrent remote commands)';
+  }
+  return msg + ' (reason: ' + reason + ')';
+}
+
 // ---------- command assembly (single-quote escape: ' -> '\'' ) ----------
 export function shellQuoteSingle(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
@@ -247,6 +268,10 @@ export class SshConn {
     this.verifyError = null;  // set by makeHostVerifier
     this._dead = false; // becomes true when the underlying ssh2 client emits close unexpectedly
     this._isClosing = false; // true while dispose() is intentionally closing the client
+    // Per-connection session-channel concurrency bound (see _acquireChannel/_releaseChannel).
+    this._channelLimit = cfg.maxChannelsPerConnection ?? 6;
+    this._channelActive = 0;
+    this._channelWaiters = [];
     // Called when the ssh2 client dies unexpectedly (keepalive failure, network drop, remote close).
     // Marks the connection as dead and clears cached state so the next connect() can rebuild.
     // Ignored when the close was caused by an intentional dispose().
@@ -399,6 +424,26 @@ export class SshConn {
     if (!this.client) throw new SshError({ hostId: this.id, stage: 'not-connected', message: 'connection not open (host ' + (this.cfg.host ?? this.id) + ')' });
   }
 
+  // FIFO bound on concurrently open session channels per connection. sshd's default
+  // MaxSessions is 10 per TCP connection; every exec opens a session channel, so
+  // unbounded concurrent execs on one pooled connection overflow that budget and the
+  // surplus channel opens are refused ("open failed"). A slot is held for the whole
+  // command (the channel stays open until the stream closes) and handed to the next
+  // waiter on release, keeping the active count exact.
+  _acquireChannel() {
+    if (this._channelActive < this._channelLimit) {
+      this._channelActive++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this._channelWaiters.push(resolve));
+  }
+
+  _releaseChannel() {
+    const next = this._channelWaiters.shift();
+    if (next) next(); // hand the freed slot straight to the next waiter (active unchanged)
+    else if (this._channelActive > 0) this._channelActive--;
+  }
+
   async _doExecChannel(cmd, opts = {}) {
     this._ensureOpen();
     const full = buildRemoteCommand(cmd, opts.cwd);
@@ -407,7 +452,7 @@ export class SshConn {
       try {
         // ssh2 throws "Not connected" synchronously when the connection is dead — wrap in SshError
         stream = this.client.exec(full, (err, s) => {
-          if (err) reject(new SshError({ hostId: this.id, stage: 'exec-open', message: err.message, cause: err }));
+          if (err) reject(new SshError({ hostId: this.id, stage: 'exec-open', message: describeChannelOpenError(err), cause: err }));
           else resolve(s);
         });
       } catch (err) {
@@ -436,57 +481,67 @@ export class SshConn {
   }
 
   async exec(cmd, opts = {}) {
-    const stream = await this._execChannel(cmd, opts);
-    const out = [];
-    const errOut = [];
-    let outBytes = 0;
-    const settled = await new Promise((resolve, reject) => {
-      let done = false;
-      const finish = (fn, value) => { if (done) return; done = true; if (timer) clearTimeout(timer); fn(value); };
-      const timer = opts.timeoutMs
-        ? setTimeout(() => {
+    await this._acquireChannel();
+    try {
+      const stream = await this._execChannel(cmd, opts);
+      const out = [];
+      const errOut = [];
+      let outBytes = 0;
+      const settled = await new Promise((resolve, reject) => {
+        let done = false;
+        const finish = (fn, value) => { if (done) return; done = true; if (timer) clearTimeout(timer); fn(value); };
+        const timer = opts.timeoutMs
+          ? setTimeout(() => {
+              try { stream.close(); } catch { /* noop */ }
+              finish(reject, new SshError({ hostId: this.id, stage: 'exec-timeout', message: 'exec timed out after ' + opts.timeoutMs + 'ms: ' + cmd }));
+            }, opts.timeoutMs)
+          : null;
+        stream.on('data', (d) => {
+          outBytes += d.length;
+          if (opts.maxStdoutBytes !== undefined && outBytes > opts.maxStdoutBytes) {
+            // Large-output guard: abort once output exceeds the bound (the tool layer maps
+            // it to SEARCH_RAW_OUTPUT_OVERFLOW), preventing memory blowup.
             try { stream.close(); } catch { /* noop */ }
-            finish(reject, new SshError({ hostId: this.id, stage: 'exec-timeout', message: 'exec timed out after ' + opts.timeoutMs + 'ms: ' + cmd }));
-          }, opts.timeoutMs)
-        : null;
-      stream.on('data', (d) => {
-        outBytes += d.length;
-        if (opts.maxStdoutBytes !== undefined && outBytes > opts.maxStdoutBytes) {
-          // Large-output guard: abort once output exceeds the bound (the tool layer maps
-          // it to SEARCH_RAW_OUTPUT_OVERFLOW), preventing memory blowup.
-          try { stream.close(); } catch { /* noop */ }
-          finish(reject, new SshError({ hostId: this.id, stage: 'exec-output-overflow', message: 'exec output exceeded ' + opts.maxStdoutBytes + ' bytes: ' + cmd }));
-          return;
-        }
-        out.push(d);
+            finish(reject, new SshError({ hostId: this.id, stage: 'exec-output-overflow', message: 'exec output exceeded ' + opts.maxStdoutBytes + ' bytes: ' + cmd }));
+            return;
+          }
+          out.push(d);
+        });
+        stream.stderr.on('data', (d) => errOut.push(d));
+        stream.on('close', (c, sig) => finish(resolve, { code: c ?? -1, signal: sig ?? null }));
+        stream.on('error', (e) => finish(reject, new SshError({ hostId: this.id, stage: 'exec', message: e.message, cause: e })));
       });
-      stream.stderr.on('data', (d) => errOut.push(d));
-      stream.on('close', (c, sig) => finish(resolve, { code: c ?? -1, signal: sig ?? null }));
-      stream.on('error', (e) => finish(reject, new SshError({ hostId: this.id, stage: 'exec', message: e.message, cause: e })));
-    });
-    return { code: settled.code, signal: settled.signal, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(errOut).toString('utf8') };
+      return { code: settled.code, signal: settled.signal, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(errOut).toString('utf8') };
+    } finally {
+      this._releaseChannel();
+    }
   }
 
   // Yields {stream:'stdout'|'stderr', chunk:Buffer}, then a final {exitCode:number}.
   async *execStream(cmd, opts = {}) {
-    const stream = await this._execChannel(cmd, opts);
-    const queue = [];
-    let ended = false;
-    let err = null;
-    let exitCode = -1;
-    let wake;
-    const notify = () => { if (wake) { const w = wake; wake = undefined; w(); } };
-    stream.on('data', (d) => { queue.push({ w: 'stdout', c: d }); notify(); });
-    stream.stderr.on('data', (d) => { queue.push({ w: 'stderr', c: d }); notify(); });
-    stream.on('error', (e) => { err = e; ended = true; notify(); });
-    stream.on('close', (c) => { exitCode = c ?? -1; ended = true; notify(); });
-    for (;;) {
-      if (queue.length) { const it = queue.shift(); yield { stream: it.w, chunk: it.c }; continue; }
-      if (ended) break;
-      await new Promise((r) => { wake = r; if (queue.length || ended) { wake = undefined; r(); } });
+    await this._acquireChannel();
+    try {
+      const stream = await this._execChannel(cmd, opts);
+      const queue = [];
+      let ended = false;
+      let err = null;
+      let exitCode = -1;
+      let wake;
+      const notify = () => { if (wake) { const w = wake; wake = undefined; w(); } };
+      stream.on('data', (d) => { queue.push({ w: 'stdout', c: d }); notify(); });
+      stream.stderr.on('data', (d) => { queue.push({ w: 'stderr', c: d }); notify(); });
+      stream.on('error', (e) => { err = e; ended = true; notify(); });
+      stream.on('close', (c) => { exitCode = c ?? -1; ended = true; notify(); });
+      for (;;) {
+        if (queue.length) { const it = queue.shift(); yield { stream: it.w, chunk: it.c }; continue; }
+        if (ended) break;
+        await new Promise((r) => { wake = r; if (queue.length || ended) { wake = undefined; r(); } });
+      }
+      if (err) throw new SshError({ hostId: this.id, stage: 'exec-stream', message: err.message, cause: err });
+      yield { exitCode };
+    } finally {
+      this._releaseChannel();
     }
-    if (err) throw new SshError({ hostId: this.id, stage: 'exec-stream', message: err.message, cause: err });
-    yield { exitCode };
   }
 
   async _doShellChannel(opts = {}) {
@@ -495,7 +550,7 @@ export class SshConn {
       try {
         // ssh2 throws "Not connected" synchronously when the connection is dead — wrap in SshError
         this.client.shell({ term: opts.term ?? 'xterm-256color', cols: opts.cols ?? 80, rows: opts.rows ?? 24 }, (err, stream) => {
-          if (err) reject(new SshError({ hostId: this.id, stage: 'shell-open', message: err.message, cause: err }));
+          if (err) reject(new SshError({ hostId: this.id, stage: 'shell-open', message: describeChannelOpenError(err), cause: err }));
           else resolve(stream);
         });
       } catch (err) {
@@ -530,7 +585,7 @@ export class SshConn {
       this._sftpPromise = new Promise((resolve, reject) => {
         try {
           this.client.sftp((err, sftp) => {
-            if (err) reject(new SshError({ hostId: this.id, stage: 'sftp-open', message: err.message, cause: err }));
+            if (err) reject(new SshError({ hostId: this.id, stage: 'sftp-open', message: describeChannelOpenError(err), cause: err }));
             else resolve(sftp);
           });
         } catch (err) {
@@ -753,6 +808,7 @@ export class SftpWrapper {
 export class SshPool {
   constructor(options = {}) {
     this.maxConnections = options.maxConnections ?? 4;
+    this.maxChannelsPerConnection = options.maxChannelsPerConnection ?? 6;
     this.conns = new Map();  // hostId -> SshConn
     this.waiters = [];
     this.disposed = false;
@@ -779,7 +835,7 @@ export class SshPool {
       // disposed pool never hands out a new connection.
       if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
     }
-    const conn = new SshConn(cfg);
+    const conn = new SshConn({ ...cfg, maxChannelsPerConnection: cfg.maxChannelsPerConnection ?? this.maxChannelsPerConnection });
     this.conns.set(id, conn);
     try {
       return await conn.connect();

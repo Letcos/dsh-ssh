@@ -5,3 +5,4 @@
       name: '@dsh-ssh/dsh-ssh'
       config:
         maxConnections: 4
+        maxChannelsPerConnection: 6
