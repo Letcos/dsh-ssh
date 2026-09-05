@@ -39,7 +39,7 @@ assert.ok(loaded, 'window.__ModuleLoader__.load was not called');
 assert.equal(loaded.id, '@dsh-ssh/dsh-ssh');
 const mod = loaded.factory(requireStub);
 assert.equal(typeof mod.apply, 'function', 'factory must export apply');
-assert.deepEqual([...mod.inject], ['slots', 'workspaces', 'locale', 'remote']);
+assert.deepEqual([...mod.inject], ['slots', 'locale', 'remote', 'remote.directoryPicker']);
 assert.deepEqual([...required], ['react', '@deepseek-ai/dsh-client-ui-primitives']);
 
 // The inline Typert client descriptors must mirror lib/typert-contribution.js
@@ -67,8 +67,8 @@ assert.equal(priorityUses.length, 3, 'directoryFlow x2 + bash tool.call.toolview
 assert.ok(code.includes('function DirectoryFlowCombined'), 'client.js must define the DirectoryFlowCombined occupant');
 assert.ok(code.includes('function LocalFlowBody'), 'client.js must define the local-tab browser body');
 assert.ok(code.includes('function RemoteFlowBody'), 'client.js must define the remote-tab flow body');
-assert.ok(code.includes('ctx.workspaces.listDirectory'), 'client.js must inject workspaces.listDirectory for the local tab');
-assert.ok(code.includes('ctx.workspaces.createDirectory'), 'client.js must inject workspaces.createDirectory for the local tab');
+assert.ok(code.includes("pickerCall('list')"), 'client.js must route listDirectory via ctx.remote.directoryPicker.list');
+assert.ok(code.includes("pickerCall('createDirectory')"), 'client.js must route createDirectory via ctx.remote.directoryPicker.createDirectory');
 assert.ok(code.includes('ctx.slots.inject("conversation.hero.workspace.directoryFlow"'), 'nested slots.inject pattern expected for hero hole');
 assert.ok(code.includes('ctx.slots.inject("sidebar.workspaces.directoryFlow"'), 'nested slots.inject pattern expected for sidebar hole');
 assert.ok(code.includes('ctx.locale.register("workspace.ssh"'), 'workspace.ssh locale must be registered');

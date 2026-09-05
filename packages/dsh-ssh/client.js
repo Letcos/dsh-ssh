@@ -2572,7 +2572,7 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- registration ----------
-    var inject = ["slots", "workspaces", "locale", "remote"];
+    var inject = ["slots", "locale", "remote", "remote.directoryPicker"];
 
     function apply(ctx) {
       ctx.effect(function () {
@@ -2627,6 +2627,15 @@ window.__ModuleLoader__.load({
         if (mountFailure !== null) return;
         sshService = sshCtx.remote.ssh;
         controller.load();
+      });
+
+      // The directory picker moved from ctx.workspaces.* (0.1.1) to the
+      // ctx.remote.directoryPicker namespace (0.1.2, api-workspace-controller).
+      // Like remote.ssh, the flattened key must be injected on a child fiber
+      // before ctx.remote.directoryPicker can be dereferenced from this fiber.
+      var directoryPickerService = null;
+      ctx.inject(["remote.directoryPicker"], function (pickerCtx) {
+        directoryPickerService = pickerCtx.remote && pickerCtx.remote.directoryPicker;
       });
 
       // directoryFlow occupant locale (workspace.ssh).
@@ -2702,6 +2711,23 @@ window.__ModuleLoader__.load({
           return ssh[name].apply(ssh, args);
         };
       };
+      // ctx.remote.directoryPicker.* resolves RemoteResult ({ok:true,value} /
+      // {ok:false,error}); the directoryFlow UI consumed bare values from
+      // ctx.workspaces.* in 0.1.1, so unwrap here to preserve that contract.
+      var pickerCall = function (name) {
+        return function () {
+          var args = Array.prototype.slice.call(arguments);
+          var picker = directoryPickerService;
+          if (!picker || typeof picker[name] !== 'function') {
+            return Promise.reject(new Error(remoteError()));
+          }
+          return picker[name].apply(picker, args).then(function (r) {
+            if (r && r.ok) return r.value;
+            var msg = r && r.error && r.error.message ? r.error.message : ('directoryPicker.' + name + ' failed');
+            throw new Error(msg);
+          });
+        };
+      };
       var injectedFlow = function () {
         return {
           listHosts: remoteCall('listHosts'),
@@ -2709,12 +2735,12 @@ window.__ModuleLoader__.load({
           resolveRemoteHome: remoteCall('resolveRemoteHome'),
           createPlaceholder: remoteCall('createPlaceholder'),
           trustHostKey: remoteCall('trustHostKey'),
-          listDirectory: function (path, signal) { return ctx.workspaces.listDirectory(path, signal); },
-          createDirectory: function (path, name) { return ctx.workspaces.createDirectory(path, name); },
+          listDirectory: pickerCall('list'),
+          createDirectory: pickerCall('createDirectory'),
           // Native fallback: when the host has no browse capability, pop the system
-          // dialog via the official native picker (dsh-client-runtime/lib/client.js:
-          // 9954-9958, the same path the official native picker uses).
-          pickDirectory: function () { return ctx.workspaces.pickDirectory(); },
+          // dialog via the official native picker (ctx.remote.directoryPicker.pick,
+          // the same path the official native picker uses).
+          pickDirectory: pickerCall('pick'),
           t: ctx.locale.bind("workspace.ssh"),
         };
       };

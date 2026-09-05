@@ -6,15 +6,16 @@
 // plain objects recursively but replaces arrays wholesale
 // (dsh-settings/lib/index.js:235).
 import z from '@deepseek-ai/schemastery';
-import { settingsNamespace } from '@deepseek-ai/dsh-settings';
 
-// settingsNamespace enforces /^[a-z][a-z0-9-]*$/ (no dots) — hence kebab-case dsh-ssh-hosts
-export const HOSTS_NAMESPACE = settingsNamespace('dsh-ssh-hosts');
+// settingsNamespace() was removed in DSH 0.1.2; settings.register/get accept the
+// bare namespace string. The name must match /^[a-z][a-z0-9-]*$/ (no dots) —
+// hence kebab-case dsh-ssh-hosts.
+export const HOSTS_NAMESPACE = 'dsh-ssh-hosts';
 
 // Legacy namespace (previously dssh-hosts): read-only fallback source. The read
 // side falls back to it only when dsh-ssh-hosts is empty; the write side only
 // writes dsh-ssh-hosts (see readHostsDoc and SshRemoteService saveHost/deleteHost).
-export const LEGACY_HOSTS_NAMESPACE = settingsNamespace('dssh-hosts');
+export const LEGACY_HOSTS_NAMESPACE = 'dssh-hosts';
 
 // HostConfig — one SSH target. Mirrors the ssh-core HostConfig shape.
 export const HostConfigSchema = z.object({
