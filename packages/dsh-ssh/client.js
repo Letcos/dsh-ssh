@@ -2431,32 +2431,101 @@ window.__ModuleLoader__.load({
       var sep = root.indexOf("\\") !== -1 && String(viewCwd).indexOf("/") === -1 ? "\\" : "/";
       return sshNormalizeSegments(root + sep + String(viewCwd));
     }
+    // ── Terminal card model: mirrors 0.2.0-rc.2's terminalCardModel ──────────────
+    // The official model no longer reads block.callView/resultView (those projections
+    // are gone): it parses the call arguments and derives the card from the tool name
+    // and the single result text. If this drifts, `expandable` stays false and a
+    // completed bash row cannot be expanded by clicking — the failure this code fixes.
+    function sshParsedToolCall(block) {
+      if (!("kind" in block) && block.phase === "preparing") return null;
+      var call = "kind" in block ? block.call : block;
+      if (call === null || call === void 0) return null;
+      var value;
+      try {
+        value = JSON.parse(call.argsRaw);
+      } catch (e) {
+        return null;
+      }
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+      return { name: call.name, args: value };
+    }
+    // Only bash/pwsh are shell calls, and only with a well-formed argument set.
+    // Escalation fields must form a valid pair or the call is not treated as a shell.
+    function sshShellCall(name, args) {
+      if (name !== "bash" && name !== "pwsh") return null;
+      var command = args.command, description = args.description, timeoutMs = args.timeoutMs,
+        workdir = args.workdir, background = args.run_in_background;
+      if (typeof command !== "string" || command.trim() === "") return null;
+      if (timeoutMs !== void 0 && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0)) return null;
+      if (workdir !== void 0 && typeof workdir !== "string") return null;
+      if (background !== void 0 && typeof background !== "boolean") return null;
+      if (!sshValidEscalationFields(args)) return null;
+      // No description marks a persistent shell call; those never render a terminal card.
+      if (description === void 0) {
+        return { kind: "shell", command: command, description: void 0, workdir: void 0, persistent: true, background: false };
+      }
+      return { kind: "shell", command: command, description: description, workdir: workdir, persistent: false, background: background === true };
+    }
+    function sshValidEscalationFields(args) {
+      var mode = args.sandbox_permissions, justification = args.justification;
+      if (mode === void 0 && justification === void 0) return true;
+      return typeof mode === "string" && typeof justification === "string";
+    }
+    // A terminal card only carries a single text block; anything else is not one.
+    function sshSingleResultText(block) {
+      if (!Array.isArray(block.content) || block.content.length !== 1) return void 0;
+      var only = block.content[0];
+      return only && only.type === "text" ? only.text : void 0;
+    }
     function sshTerminalCardModel(block, sessionCwd) {
-      var call = block.callView && block.callView.card === "terminal" ? block.callView : null;
+      var parsed = sshParsedToolCall(block);
+      if (parsed === null) return null;
+      var call = sshShellCall(parsed.name, parsed.args);
+      if (call === null || call.background) return null;
+      var cwd = sshResolveTerminalCwd(call.workdir, sessionCwd);
       if (!("kind" in block)) {
-        if (call === null) return null;
         return {
           description: call.description,
           card: {
-            command: call.title,
-            cwd: sshResolveTerminalCwd(call.cwd, sessionCwd),
+            command: call.command,
+            cwd: cwd,
             output: void 0, exitCode: void 0, signal: void 0, running: true
           }
         };
       }
-      var result = block.resultView && block.resultView.card === "terminal" ? block.resultView : null;
-      if (result === null) return null;
+      // A failed, persistent, or spilled shell call has no terminal card.
+      if (block.isError || call.persistent) return null;
+      var output = sshSingleResultText(block);
+      if (output === void 0) return null;
+      var status = sshParseExitStatusLocal(output);
       return {
-        description: call !== null ? call.description : void 0,
+        description: call.description,
         card: {
-          command: result.title ?? (call !== null ? call.title : void 0) ?? "",
-          cwd: call === null ? void 0 : sshResolveTerminalCwd(call.cwd, sessionCwd),
-          output: result.output,
-          exitCode: result.exitCode,
-          signal: result.signal,
+          command: call.command,
+          cwd: cwd,
+          output: status.body,
+          exitCode: status.exitCode,
+          signal: status.signal,
           running: false
         }
       };
+    }
+    // Local copy of the exit-status marker parse (the host renders the same markers),
+    // so the client can split the terminal body from its exit code without a round trip.
+    function sshParseExitStatusLocal(text) {
+      var body = String(text);
+      var exitCode, signal;
+      var exitMatch = /(?:^|\n)\[exit code: (-?\d+)\]\s*$/u.exec(body);
+      if (exitMatch !== null) {
+        exitCode = Number(exitMatch[1]);
+        body = body.slice(0, exitMatch.index);
+      }
+      var signalMatch = /(?:^|\n)\[killed by signal: ([^\]]+)\]\s*$/u.exec(body);
+      if (signalMatch !== null) {
+        signal = signalMatch[1];
+        body = body.slice(0, signalMatch.index);
+      }
+      return { body: body, exitCode: exitCode, signal: signal };
     }
     function sshTerminalFailed(model) {
       var card = model.card;
@@ -2497,6 +2566,21 @@ window.__ModuleLoader__.load({
     function BashSshRow(props) {
       var toolName = props.toolName, block = props.block, sessionId = props.sessionId,
         useSessions = props.useSessions, inspect = props.inspect, t = props.t;
+      // The slot owner injects useDisclosure (per-call disclosure state) and phase
+      // ('preparing' | 'start' | 'result'). A call still being prepared has no
+      // arguments to parse, so it renders as a plain preparing row.
+      var useDisclosure = props.useDisclosure;
+      if (props.phase === "preparing") {
+        return React.createElement("div", {
+          className: SSH_BASH_CSS.root,
+          "data-sample": "bash",
+          "data-variant": "bash",
+          "data-state": "running"
+        },
+          React.createElement("span", { className: SSH_BASH_CSS.leading }, sshLeadingFor("running")),
+          React.createElement("span", { className: SSH_BASH_CSS.title },
+            SSH_TOOL_TITLES[toolName] ?? SSH_VARIANT_TITLES[sshClassifyTool(toolName)]));
+      }
       var model = sshToolRowModel(toolName, block);
       var sessionCwd = useSessions ? useSessions(function (list) {
         return list.byId && list.byId[sessionId] ? list.byId[sessionId].cwd : void 0;
@@ -2509,14 +2593,21 @@ window.__ModuleLoader__.load({
       }
       var state = model.state === "ok" && terminal !== null && sshTerminalFailed(terminal) ? "error" : model.state;
       var status = sshStateStatus(state, t);
-      var expandedState = React.useState(false);
-      var expanded = expandedState[0];
-      var setExpanded = expandedState[1];
+      // Prefer the owner's disclosure state so expansion participates in the host's
+      // per-call disclosure management; fall back to local state if a composition
+      // does not inject it.
+      var local = React.useState(false);
+      var disclosure = typeof useDisclosure === "function" ? useDisclosure() : null;
+      var expanded = disclosure !== null ? disclosure.expanded : local[0];
+      var setExpanded = disclosure !== null ? disclosure.toggle : local[1];
       var genericError = terminal === null && model.state === "error" && (model.body !== null || model.output !== null);
       var expandable = terminal !== null || genericError;
       var open = expanded && expandable;
       var failureLine = model.state === "error" ? model.errorSummary : null;
-      var toggleExpand = function () { setExpanded(function (v) { return !v; }); };
+      var toggleExpand = function () {
+        if (disclosure !== null) setExpanded();
+        else setExpanded(function (v) { return !v; });
+      };
       var toggleFromKeyboard = function (event) {
         if (!expandable || (event.key !== "Enter" && event.key !== " ")) return;
         event.preventDefault();

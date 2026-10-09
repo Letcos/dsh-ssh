@@ -48,13 +48,25 @@ function readPrimitivesExports() {
   return names.size > 0 ? names : null;
 }
 
-// minimal react + primitives stubs so the factory body parses and runs
+// minimal react + primitives stubs so the factory body parses and runs.
+// useState keeps a per-render slot list so a component that toggles disclosure can be
+// re-rendered with a changed value (the bash row's expand behaviour is asserted below).
+let stateSlots = [];
+let stateCursor = 0;
 const element = (type, props, ...children) => ({ type, props, children });
 const reactStub = {
   createElement: element,
-  useState: () => [{}, () => {}],
+  useState: (initial) => {
+    const index = stateCursor++;
+    if (!(index in stateSlots)) stateSlots[index] = typeof initial === 'function' ? initial() : initial;
+    const set = (next) => { stateSlots[index] = typeof next === 'function' ? next(stateSlots[index]) : next; };
+    return [stateSlots[index], set];
+  },
   useEffect: () => {},
   useRef: () => ({}),
+  useMemo: (fn) => fn(),
+  useCallback: (fn) => fn,
+  memo: (component) => component,
   Fragment: 'Fragment',
 };
 const required = new Set();
@@ -98,6 +110,109 @@ assert.deepEqual([...required], ['react', '@deepseek-ai/dsh-client-ui-primitives
 // Names read off the primitives namespace must exist in the installed DSH: an undefined
 // component reaches React.createElement and throws at render time in the browser.
 assert.deepEqual(missing, [], 'client.js reads primitives the installed DSH does not export: ' + missing.join(', '));
+
+// ── bash toolview: a completed bash call must be expandable ──────────────────────
+// 0.2.0-rc.2 rebuilt the official terminal model: it no longer reads
+// block.callView/resultView but parses the call arguments and the single result text.
+// A model that still expects the removed projections yields expandable=false, so
+// clicking a finished bash row does nothing. Render the registered occupant with a
+// real 0.2.0-rc.2 result block and assert it is expandable and toggles open.
+{
+  const registered = [];
+  const localeDicts = new Map();
+  // The apply() body touches several services; only slots/locale matter for the row.
+  const applyCtx = {
+    slots: {
+      register: (options, component) => { registered.push({ options, component }); return () => {}; },
+      inject: (name, fn) => { try { return fn(); } catch { return undefined; } },
+    },
+    // $mount is awaited by apply(); a resolved stub keeps apply synchronous enough to
+    // capture the slot registrations.
+    remote: { $mount: () => Promise.resolve(() => {}), $on: () => () => {} },
+    locale: {
+      register: (ns, dicts) => { localeDicts.set(ns, dicts); return () => {}; },
+      bind: (ns) => (key, vars) => {
+        const dict = localeDicts.get(ns) ?? {};
+        const table = dict.zh ?? dict.en ?? {};
+        let text = table[key] ?? key;
+        for (const [k, v] of Object.entries(vars ?? {})) text = text.replace('{' + k + '}', String(v));
+        return text;
+      },
+    },
+    effect: () => () => {},
+    inject: () => () => {},
+    get: () => undefined,
+    on: () => () => {},
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+  };
+  assert.doesNotThrow(() => mod.apply(applyCtx), 'apply() must run against a minimal client context');
+  const bashEntry = registered.find((r) => r.options?.name === 'tool.call.toolview' && r.options?.key === 'bash');
+  assert.ok(bashEntry, 'client.js must register the bash toolview occupant');
+  assert.equal(bashEntry.options.priority, -1, 'bash toolview must shadow the stock row (priority -1)');
+
+  // A settled bash call exactly as 0.2.0-rc.2 delivers it: argsRaw carries the command,
+  // and content holds the single text block the host rendered (body + exit marker).
+  const block = {
+    kind: 'result',
+    callId: 'call-1',
+    call: { name: 'bash', argsRaw: JSON.stringify({ command: 'echo hi', description: 'say hi' }) },
+    content: [{ type: 'text', text: 'hi\n\n[exit code: 0]' }],
+    isError: false,
+  };
+  stateSlots = [];
+  stateCursor = 0;
+  const t = (key, vars) => (vars ? key + ':' + JSON.stringify(vars) : key);
+  // A stand-in for the owner's disclosure hook: the expanded flag lives in the test.
+  let expandedFlag = false;
+  const props = {
+    toolName: 'bash', block, sessionId: 's1', phase: 'result',
+    useSessions: (selector) => selector({ byId: { s1: { cwd: '/data/work' } } }),
+    useDisclosure: () => ({ expanded: expandedFlag, toggle: () => { expandedFlag = !expandedFlag; } }),
+    inspect: () => {}, t,
+  };
+  const render = () => {
+    stateCursor = 0;
+    const el = bashEntry.component(props);
+    // The row root is the first child carrying data-sample="bash".
+    const find = (node) => {
+      if (!node || typeof node !== 'object') return null;
+      if (node.props && node.props['data-sample'] === 'bash') return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    return { el, root: find(el) };
+  };
+
+  const collapsed = render();
+  assert.ok(collapsed.root, 'the bash row must render a root node');
+  assert.equal(collapsed.root.props['data-expandable'], true,
+    'a settled bash call must be expandable (else clicking it does nothing)');
+  assert.equal(collapsed.root.props['data-state'], 'ok', 'a clean exit must render state ok');
+
+  // Toggling must open the terminal body: invoke the row's own click handler, then
+  // re-render the way React would.
+  assert.equal(typeof collapsed.root.props.onClick, 'function',
+    'an expandable bash row must expose a click handler');
+  collapsed.root.props.onClick();
+  const opened = render();
+  assert.equal(opened.root.props['aria-expanded'], true, 'after clicking, the row must report expanded');
+  assert.ok(JSON.stringify(opened.el).includes('hi'), 'the expanded row must carry the command output');
+
+  // A background call and an error call are NOT terminal cards (official behaviour).
+  const bg = { ...block, call: { name: 'bash', argsRaw: JSON.stringify({ command: 'x', description: 'd', run_in_background: true }) } };
+  stateSlots = []; stateCursor = 0;
+  const bgRow = bashEntry.component({ ...props, block: bg, useDisclosure: () => ({ expanded: false, toggle: () => {} }) });
+  const bgRoot = (function find(node) {
+    if (!node || typeof node !== 'object') return null;
+    if (node.props && node.props['data-sample'] === 'bash') return node;
+    for (const child of node.children ?? []) { const hit = find(child); if (hit) return hit; }
+    return null;
+  })(bgRow);
+  assert.notEqual(bgRoot.props['data-expandable'], true, 'a background bash call is not an expandable terminal card');
+}
 
 // The inline Typert client descriptors must mirror lib/typert-contribution.js
 // (method + wire parameter list), or saveHost/deleteHost arg counts drift and
