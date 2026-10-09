@@ -69,12 +69,18 @@ function makeSandboxCtx({ hosts = HOSTS, sshPool, mode = 'workspace-write', appr
   const fs = { sandboxMode: mode };
   const shell = { sandboxMode: mode };
   const sandboxPolicy = { resolve: ({ session } = {}) => ({ mode, workspaceRoot: '/data/work', ...(session ? { sessionId: session.id } : {}) }) };
+  // Hosts resolve through the sshPool service (it owns the plugin config); a supplied
+  // connection double is extended with that lookup.
+  const pool = sshPool
+    ? Object.assign(Object.create(Object.getPrototypeOf(sshPool) ?? Object.prototype), sshPool, {
+        host: sshPool.host ?? ((id) => hosts[id]),
+      })
+    : { host: (id) => hosts[id] };
   return {
     tools: { register(def) { registered.set(def.name, def); return () => registered.delete(def.name); }, get() { return undefined; } },
     shell, fs,
     get(key) {
-      if (key === 'sshPool') return sshPool;
-      if (key === 'settings') return { get: () => ({ hosts }) };
+      if (key === 'sshPool') return pool;
       if (key === 'attachments') return undefined;
       if (key === 'sandboxPolicy') return sandboxPolicy;
       if (key === 'approval') return approval;
@@ -123,7 +129,7 @@ test('local delegation mode (no remoteRouting, backend mounted): bash/write/edit
 test('no sandbox backend (no remoteRouting): bash/write/edit schema excludes escalation fields', () => {
   const { pool } = makePool({ sftp: makeMemorySftp({}) });
   const ctx = makeSandboxCtx({ sshPool: pool });
-  ctx.get = (key) => (key === 'sshPool' || key === 'settings') ? (key === 'sshPool' ? pool : { get: () => ({ hosts: HOSTS }) }) : undefined;
+  ctx.get = (key) => (key === 'sshPool' ? pool : undefined);
   apply(ctx);
   for (const name of ['bash', 'write', 'edit']) {
     const props = (getTool(ctx, name).parameters ?? {}).properties ?? {};

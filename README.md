@@ -42,7 +42,7 @@
 - **后台任务远端化**：`run_in_background` 连同 `job_list` / `job_output` / `job_kill` 整条链路都在远端执行。
 - **Sandbox 远端同样生效**：三种 sandbox 模式在远端与本地行为一致。
 - **默认健壮**：known_hosts 校验、断线自动重连、原子写入（临时文件 + rename）、`ssh2` 连接池（exec + SFTP 复用）。
-- **凭据只写存储**：口令经 DSH settings 的 secret 机制只写保存；私钥按本地路径引用。
+- **凭据只写存储**：口令经 DSH 配置的 secret 机制只写保存（保存后不回传，留空沿用已存值）；私钥按本地路径引用。
 
 ## 安装
 
@@ -81,7 +81,7 @@ pnpm 11 会拦截 `ssh2` 及其可选原生加速依赖 `cpu-features` 的构建
 | Windows 远端 | 不支持（仅 Linux / macOS） |
 | Preset | 任意 preset 均可，含 standard；与 preset 无关 |
 
-> **版本要求**：Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies（`@deepseek-ai/cordis@^4.0.1`、`@deepseek-ai/dsh-*@^0.1.1-rc.2`、`@deepseek-ai/schemastery@^3.18.1`，详见 `packages/dsh-ssh/package.json`）
+> **版本要求**：Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies（`@deepseek-ai/cordis@^4.0.1`、`@deepseek-ai/dsh-*@^0.2.0-rc.2`、`@deepseek-ai/schemastery@^3.18.4`，详见 `packages/dsh-ssh/package.json`）
 
 ## 已知限制
 
@@ -97,7 +97,7 @@ pnpm 11 会拦截 `ssh2` 及其可选原生加速依赖 `cpu-features` 的构建
 - **私钥权限错误（UNPROTECTED PRIVATE KEY）**：OpenSSH 要求私钥权限为 `600`/`400`，组/其他用户不可读写，否则直接拒绝；请检查文件权限与路径（避免含空格或中文），确保 DSH 能读取。
 - **SFTP 被禁时自动降级为 exec + base64（变慢）**：远端若禁用 SFTP，文件操作仍可用但降级为 `exec` 通道 base64 传输（ExecFs），大文件/批量操作会明显变慢，属预期降级；如需恢复速度请在远端 `sshd_config` 启用 SFTP 子系统。
 - **占位目录说明（`~/.dsh/remote/<hostId>/...`）**：远端工作区在本地仅为占位目录（普通 workspace 记录，`workspaceRegistry` 会 `realpath` 校验），不含业务数据但必须真实存在且不能为符号链接；请勿手动删除或移动，需切换请走 DSH 工作区管理。
-- **如何收集日志**：工具失败会返回带 hostId、远端命令原文、退出码与输出尾部的明确错误；配合 `~/.dsh/settings.yaml` 中 `dsh-ssh-hosts` 配置、DSH 控制台日志与远端 `sshd` 日志（`/var/log/auth.log` 或 `journalctl -u sshd`）可快速定位，提 issue 时请脱敏后附上。
+- **如何收集日志**：工具失败会返回带 hostId、远端命令原文、退出码与输出尾部的明确错误；配合活动 profile 的 `cordis.patch.yml` 中 `dsh-ssh-hosts` 行配置、DSH 控制台日志与远端 `sshd` 日志（`/var/log/auth.log` 或 `journalctl -u sshd`）可快速定位，提 issue 时请脱敏后附上。
 
 ## FAQ
 

@@ -23,7 +23,6 @@ import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs } from '@
 import { buildSearchCaps, createGlobTool, createGrepTool } from './tools/search.js';
 import { buildFsCaps, createReadTool, createWriteTool, createEditTool, createReadImageTool } from './tools/fs.js';
 import { createBashTool } from './tools/bash.js';
-import { readHostsDoc } from './src/settings.js';
 
 export const name = '@dsh-ssh/dsh-ssh-tools';
 // shell/fs are injected to read sandboxMode, matching how the official tools advertise
@@ -33,16 +32,15 @@ export const inject = ['tools', 'shell', 'fs'];
 // Routing / remote execution helpers
 // ═══════════════════════════════════════════════════════════════════════════
 function getHostConfig(ctx, hostId) {
-  let hosts = {};
+  // Hosts live in the sshPool service's own config (see src/settings.js): the routed
+  // tools run in an agent scope, so the pool is the one holder both scopes share.
+  let host;
   try {
-    const settings = ctx.get('settings');
-    if (settings && typeof settings.get === 'function') {
-      hosts = readHostsDoc((ns) => settings.get(ns)).hosts;
-    }
-  } catch { hosts = {}; }
-  const host = hosts[hostId];
+    const pool = ctx.get('sshPool');
+    host = pool && typeof pool.host === 'function' ? pool.host(hostId) : undefined;
+  } catch { host = undefined; }
   if (!host || typeof host !== 'object') {
-    throw new Error(`remote host "${hostId}" is not configured in dsh-ssh-hosts — add it in Settings → SSH hosts, or the workspace placeholder refers to a removed host`);
+    throw new Error(`remote host "${hostId}" is not configured in the dsh-ssh plugin config — add it in Settings → SSH hosts, or the workspace placeholder refers to a removed host`);
   }
   return { ...host, id: hostId };
 }

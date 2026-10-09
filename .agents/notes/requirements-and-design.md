@@ -88,7 +88,7 @@
 | glob/grep | tools → ctx.subprocess + 本地 rg | host 单例 subprocess + 本地依赖 | 否 |
 | 工作区创建/切换 | ctx.workspaceRegistry / ctx.directoryPicker / apiProxy | host 单例 | 否 |
 | 目录选择 UI | sidebar.workspaces.directoryFlow / conversation.hero.workspace.directoryFlow | 槽(可注入) | 是 |
-| 设置页 | settings.section 槽 + ctx.settings 命名空间 | 槽 + 命名空间 | 是 |
+| 设置页 | settings.section 槽 + 插件自带 Config | 槽 + Config | 是 |
 | 工具注册 | preset 组合文件 tools 行(经 tools.register) | preset 加载器 | 是 |
 | Host↔Client 通信 | TypertRemoteService + @Remote | @deepseek-ai/dsh-typert-protocol | 是 |
 
@@ -109,7 +109,7 @@
 
 ### 4.1 两层纯附加
 
-1. **插件 bundle dsh-ssh**: 宿主侧 ssh2 连接池(exec + SFTP、known_hosts 校验、自动重连)、SSH 主机配置(settings 命名空间)、Typert 远程目录浏览服务、客户端 UI 行(设置页 + 目录流程槽)。经官方 bundle 通道安装(dsh plugin add, 包声明 "dsh": {"bundle": {"patch": "./cordis.patch.yml"}})。
+1. **插件 bundle dsh-ssh**: 宿主侧 ssh2 连接池(exec + SFTP、known_hosts 校验、自动重连)、SSH 主机配置(插件自带 Config schema, 经 configEditor 持久化)、Typert 远程目录浏览服务、客户端 UI 行(设置页 + 目录流程槽)。经官方 bundle 通道安装(dsh plugin add, 包声明 "dsh": {"bundle": {"patch": "./cordis.patch.yml"}})。
 2. **preset standard-ssh**(已移除): 早期用 agentPresets.copy('standard','standard-ssh') 复制官方 preset 并替换工具行、按会话 cwd 路由。**方案⑤ 落地后改为 preset 无关**: host 插件监听 agent/created 钩子, 仅对远端占位 cwd 会话在该 agent scope 注册 7 个同名路由工具遮蔽官方实现(见 implemented/feature/2026-08-19-preset-independent-tool-routing.md)；standard-ssh preset 因冗余被整体删除（见 implemented/simplification/2026-08-20-remove-standard-ssh-preset.md）。
 
 > patch 层顺序(官方 /develop/basic/publish): 空根 → profile bundles → profile 自身 cordis.patch.yml → $DSH_HOME/cordis.patch.yml → --patch overlay; 按 id 覆盖行时**整个 config 被替换**(须重述全部键)。dsh-ssh 的 bundle patch 只做 insert 行, 无此问题。
@@ -127,9 +127,10 @@
 
 ### 4.4 UI 与通信
 
-- **设置页主机配置**: settings.section 槽(kind single, scope root; 出处: @deepseek-ai/dsh-client-ui-settings@lib/types/client/contract/slots.d.ts:67, 调研子代理核对); 数据经 ctx.settings 持久化到 ~/.dsh/settings.yaml 的 dsh-ssh-hosts 命名空间(settingsNamespace 强制 kebab-case, 点号被拒——M2a 实测)。
+- **设置页主机配置**: settings.section 槽(kind single, scope root; 出处: @deepseek-ai/dsh-client-ui-settings@lib/types/client/contract/slots.d.ts:67, 调研子代理核对); 数据由**插件自带的 Config schema** 承载(`static Config` + `hosts` 字段 `.volatile()`), 持久化到活动 profile 的 `cordis.patch.yml` 中插件行的 `config.hosts`。**0.2.0-rc.2 起 `ctx.settings.register/get` 已移除**, 不存在运行时命名空间注册与跨命名空间读取(详见 implemented/architecture/2026-10-10-0.2.0-rc.2-adaptation.md)。
+- **配置行 id 是兼容性契约**: profile patch 行 id 取 `dsh-ssh-hosts`(= 旧命名空间名), 因为 dsh-settings 的 `importLegacyDocument` 按 section 名匹配 entry id 来迁移旧 `settings.yaml` 数据。改名会导致老用户主机配置静默不迁移。
 - **远端目录浏览**: Host 侧暴露 Typert 远程服务, Client 侧在 sidebar.workspaces.directoryFlow / conversation.hero.workspace.directoryFlow 槽注入目录选择 UI(槽名定义源: @deepseek-ai/dsh-client-ui-workspace@lib/types/client/contract/slots.d.ts L48-62; owner 契约: occupant 拥有从 open 到 onPicked(path)/onCancel/onError 的完整交互, busy 期间禁用提交)。
-- **Host↔Client**: TypertRemoteService + @Remote(已验证导出: dsh-typert-protocol/lib/index.js:53,140 → TypertRemoteService / Remote / RemoteScope / bindTypertRemote / remoteMethods)。
+- **Host↔Client**: TypertRemoteService + @Remote(已验证导出: dsh-typert-protocol/lib/index.js:53,140 → TypertRemoteService / Remote / RemoteScope / bindTypertRemote / remoteMethods)。客户端 strict codec 的形状由注册表强制为 `{ mode:'strict', typeSymbol, create: () => {parse} }`(0.2.0-rc.2 起; 内联 `schema` 会被拒), 见 dsh-typert-registry/lib/index.js:562-566。
 
 ### 4.5 架构图(ASCII)
 
@@ -246,7 +247,7 @@ async function toolGrep(ctx, args: { pattern: string; path?: string; glob?: stri
 ### 5.4 ssh-settings: 配置与凭据
 
 ```ts
-// settings 命名空间 dsh-ssh-hosts(经 ctx.settings schema 化注册, 设置页 settings.section 槽渲染; 点号被 settingsNamespace 拒绝——M2a 实测)
+// 主机配置 dsh-ssh-hosts(插件自带 static Config, hosts 字段 .volatile() 后由设置页 settings.section 槽渲染)
 // 【M2b 设计变更】hosts 为 dict(id → HostConfig) 而非数组: 官方 settings merge 对对象递归合并、对数组整体替换,
 // 数组下"口令留空=保持已存"无法表达; dict 省略 auth.password 即保留, 删除走 mutate unset ['hosts',<id>]。详见 implemented/feature/2026-08-16-settings-crud-via-typert.md。
 const hostsSchema = { hosts: Schema.dict(HostConfigSchema).default({}) };
@@ -367,7 +368,7 @@ class RemoteDirectoryService {
 ### R9. 安全
 - **风险**: host key 不校验(中间人)、私钥/口令明文落盘、命令经 shell 拼接注入。
 - **影响**: 凭据泄露、远端被控制。
-- **对策**: known_hosts 校验(TOFU 首次写入或预填指纹, 策略见 §8.1 已决策·host key 校验 UX; host key 变更必须报错); 凭据进 DSH secret（`role('secret')`）机制, 不进 settings.yaml 明文; 命令与路径统一经引号转义工具处理, 文件内容走 SFTP 参数通道不走 shell。
+- **对策**: known_hosts 校验(TOFU 首次写入或预填指纹, 策略见 §8.1 已决策·host key 校验 UX; host key 变更必须报错); 凭据走 DSH secret（`role('secret')`）机制做脱敏与只写语义（`describe` 脱敏 + 表单不回传）; 命令与路径统一经引号转义工具处理, 文件内容走 SFTP 参数通道不走 shell。**已知待改进**: `role('secret')` 只解决"不回传", 0.2.0-rc.2 的配置最终仍以明文落在活动 profile 的 `cordis.patch.yml`(旧模型下落 `settings.yaml`), 尚未接入 OS keychain。
 
 ### R10. Windows 远端 OpenSSH 差异
 - **风险**: 路径分隔符、换行(CRLF)、默认 shell(PowerShell/cmd)、权限语义与 POSIX 不同; find/grep 在 Windows 上未必可用。
@@ -384,8 +385,8 @@ class RemoteDirectoryService {
 - **agentPresets.copy 产物落点**：`$DSH_HOME/.agent-presets` 自动加载（`dsh-agent-presets/lib/index.js:160`）→ 已随 preset 移除而废止，同上。
 - **工具实现包归属**：`bash→dsh-tool-bash、read/write/edit/read_image→dsh-tool-fs、glob/grep→dsh-tool-fs-search`（`research/2026-08-20-dsh-official-reference.md`）。
 - **M2 测试远端**：改用真实远端主机与 `test/live-config.mjs` + `DSH_SSH_TEST_*` 覆盖（`packages/dsh-ssh/test/live-config.mjs`）。
-- **凭据存储**：`role('secret')` 口令字段（describe 脱敏 + {path,set} 只写，私钥路径明文引用本地文件，暂不引入 OS keychain），出处 `src/settings.js` HostConfigSchema / `lib/hosts-model.js` redactHosts / `implemented/feature/2026-08-16-settings-crud-via-typert.md`。
-- **settings.section 槽精确用法**：`settings.section` (kind list, scope root) id `ssh-hosts` order 40，经 `ctx.settings` + Typert 持久化（点号被 settingsNamespace 拒绝），出处 `packages/dsh-ssh/client.js` SshHostsSection / `src/remote.js` / `research/2026-08-20-dsh-official-reference.md`。
+- **凭据存储**：`role('secret')` 口令字段（describe 脱敏 + {path,set} 只写，私钥路径明文引用本地文件，暂不引入 OS keychain）；落盘位置为活动 profile 的 `cordis.patch.yml` 插件行 `config.hosts`（0.2.0-rc.2 的配置模型；旧模型为 `~/.dsh/settings.yaml`），出处 `src/settings.js` HostConfigSchema / `lib/hosts-model.js` redactHosts / `implemented/feature/2026-08-16-settings-crud-via-typert.md` / `implemented/architecture/2026-10-10-0.2.0-rc.2-adaptation.md`。
+- **settings.section 槽精确用法**：`settings.section` (kind list, scope root) id `ssh-hosts` order 40，经插件自带 Config(`hosts` volatile)+ `configEditor.edit` 持久化，出处 `packages/dsh-ssh/client.js` SshHostsSection / `src/settings.js` / `src/remote.js` / `research/2026-08-20-dsh-official-reference.md`。
 - **directoryFlow 槽返回契约**：`sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow` (priority -1) 覆写官方，owner 拥有 open→onPicked/onCancel/onError 完整交互，出处 `client.js` DirectoryFlowCombined / `src/remote.js` listRemoteDir 等。
 - **read_image 远端分支**：远端 SFTP readBytes(有上限)→attachments.saveImage({data}) 内存直传(无临时文件)→复用宿主图像管线，出处 `packages/dsh-ssh/tools/fs.js` read_image 分支。
 - **占位目录路径编码**：`~/.dsh/remote/<hostId>/<base64url(绝对路径)>` 单段可逆、hostId 校验防穿越，已实现 `src/router.js` encodeRemotePath / `src/placeholder.js`。

@@ -241,7 +241,7 @@ export function hostsSecretsList(hosts) {
  * (host-side, where the unredacted value IS available). Fills auth material
  * and defaults that the redacted form could not carry.
  * @param cfg the client-sent partial config (may omit the secret).
- * @param stored the stored HostConfig from ctx.settings.get('dsh-ssh-hosts'), or undefined.
+ * @param stored the stored HostConfig from the plugin config (dsh-ssh-hosts), or undefined.
  * @returns the effective HostConfig for SshPool.testConnection.
  */
 export function mergeTestConfig(cfg, stored) {

@@ -48,12 +48,16 @@ export const TRUST_HOST_KEY_ENDPOINT = REMOTE_NAMESPACE + '/' + TRUST_HOST_KEY_M
 
 const SRC_JSON = { mode: 'src-json' };
 
-/** Identity JSON schema satisfying the strict-codec contract. */
+// Strict codecs materialize their schema through create() on first boundary use — the
+// schema is not carried inline. Values are already validated host-side and the wire
+// gateway re-asserts JSON-safety, so the schema stays a JSON passthrough and the
+// materialized instance is cached, matching how generated descriptors behave.
 function passthroughSchema(typeSymbol) {
+  let schema;
   return {
     mode: 'strict',
     typeSymbol,
-    schema: { parse: (value) => value },
+    create: () => (schema ??= { parse: (value) => value }),
   };
 }
 
@@ -191,7 +195,11 @@ export function assertContributionShape(contribution) {
     }
     if (codec.mode !== 'strict') throw new Error('typert: ' + subject + ' has unknown codec mode');
     if (typeof codec.typeSymbol !== 'string' || codec.typeSymbol.length === 0) throw new Error('typert: ' + subject + ' strict codec needs typeSymbol');
-    if (!codec.schema || typeof codec.schema.parse !== 'function') throw new Error('typert: ' + subject + ' strict codec has no parse()');
+    // A strict codec carries create() -> TypertSchema{parse}; an inline schema is
+    // rejected by the registry, so reject it here too rather than at mount time.
+    if (typeof codec.create !== 'function') throw new Error('typert: ' + subject + ' strict codec has no create()');
+    const materialized = codec.create();
+    if (!materialized || typeof materialized.parse !== 'function') throw new Error('typert: ' + subject + ' strict codec create() has no parse()');
   };
   const endpoints = new Set();
   const ids = new Set();
@@ -235,7 +243,8 @@ export function assertContributionShape(contribution) {
 /** True when a client descriptor carries strict codecs everywhere (used by tests). */
 export function allClientCodecsStrict(descriptors) {
   return descriptors.every((d) => {
-    const ok = (c) => c && c.mode === 'strict' && typeof c.schema?.parse === 'function';
+    const ok = (c) => c && c.mode === 'strict' && typeof c.create === 'function'
+      && typeof c.create()?.parse === 'function';
     return ok(d.result) && d.parameters.every((p) => ok(p.codec)) && (d.invocation.kind !== 'context' || ok(d.invocation.codec));
   });
 }

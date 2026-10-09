@@ -1,16 +1,16 @@
 // @dsh-ssh/dsh-ssh — host-side Typert remote for the settings-page host editor.
-// Settings are not exposed to configuration clients over the wire (the official
-// gateway hard-whitelists namespaces — dsh-host-apiproxy/lib/index.js:888
-// WEB_SETTINGS_NAMESPACES), so the whole host CRUD lives here:
+// Configuration clients do not reach plugin config over the wire, so the whole host
+// CRUD lives here:
 //   - SshRemoteService: a Cordis Service under key 'ssh' carrying a visible
 //     typertRemote binding (bindTypertRemote) — the gateway's validateBinding
 //     requires exactly this shape (dsh-api-gateway/lib/index.js:282).
 //   - ctx.typert.register(HOST_TYPERT_CONTRIBUTION): strict descriptors so the
 //     gateway claims /api/ssh/{testConnection,listHosts,saveHost,deleteHost}
 //     (claimsEndpoint) and dispatches to ctx.get('ssh').<method>(...).
-// The unredacted stored hosts come from ctx.settings.get('dsh-ssh-hosts') so a
-// password-auth host can be tested/saved even when the form left the password
-// blank; listHosts redacts before the value leaves the process.
+// Hosts are read UNREDACTED from the plugin's own config, so a password-auth host can
+// be tested/saved even when the form left the password blank; listHosts redacts before
+// the value leaves the process. Writes go through the profile's config editor, which
+// persists the row's config in the active profile patch.
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { SshError, HOST_KEY_UNKNOWN_STAGE, sshKeyFingerprint, sshKeyTypeFromBlob, appendKnownHost, defaultKnownHostsPath } from './ssh-core.js';
@@ -18,7 +18,7 @@ import { createPlaceholderDir, hostDisplayName, placeholderWorkspaceTitle } from
 import { encodeRemotePath } from './router.js';
 import { HOST_TYPERT_CONTRIBUTION, REMOTE_SERVICE, assertContributionShape } from '../lib/typert-contribution.js';
 import { mergeTestConfig, mergeHostPatch, validateHostConfig, formatHostErrors, redactHosts, hostsSecretsList } from '../lib/hosts-model.js';
-import { HOSTS_NAMESPACE, readHostsDoc } from './settings.js';
+import { readHosts, resolveHostFromConfig } from './settings.js';
 
 // ── TOFU host-side structured error surface ────────────────────────────────
 // The gateway (dsh-api-gateway) serializes only the message of a thrown error
@@ -57,12 +57,18 @@ async function acquireStoredOrHostKeyUnknown(acquireFn, id) {
 }
 
 export class SshRemoteService extends Service {
-  constructor(ctx, sshPool) {
+  constructor(ctx, sshPool, config) {
     super(ctx, REMOTE_SERVICE);
     this.typertRemote = bindTypertRemote(this, REMOTE_SERVICE);
     this.sshPool = sshPool;
+    // The plugin's resolved config holds the volatile refs, so hosts read through it
+    // always reflect a settings edit committed while the plugin stays mounted.
+    this.config = config ?? {};
     this.resolveStored = () => undefined;
-    this.settingsApi = null; // { get, describe, mutate, writable } — set inside ctx.inject
+    // Profile-owned config writer: { entry, editor } — set inside ctx.inject, absent in
+    // deployments without a configuration editor (a save then stays in-memory only).
+    this.configWriter = null;
+    this.saves = Promise.resolve(); // serializes profile writes in submission order
     // workspaceRegistry resolved lazily (defaults to Cordis ctx.get; a test can inject a stub).
     // A placeholder workspace record's title must be written explicitly at creation
     // (the official workspace.create wire carries no title).
@@ -70,14 +76,24 @@ export class SshRemoteService extends Service {
     this.env = process.env; // environment for placeholder-root resolution (DSH_SSH_REMOTE_ROOT > DSH_HOME > ~/.dsh); injectable in tests
   }
 
-  /** Inject-time hook: supply the stored-host lookup (settings.get is only safe inside ctx.inject). */
+  /** Inject-time hook: supply the stored-host lookup (defaults to this service's own config). */
   setStoredResolver(fn) {
     this.resolveStored = typeof fn === 'function' ? fn : () => undefined;
   }
 
-  /** Inject-time hook: supply the live settings provider for CRUD reads/writes. */
-  setSettingsApi(api) {
-    this.settingsApi = api && typeof api === 'object' ? api : null;
+  /** One stored HostConfig by id, resolved from this service's own config. */
+  host(hostId) {
+    return resolveHostFromConfig(this.config, hostId);
+  }
+
+  /** All stored HostConfigs (unredacted), resolved from this service's own config. */
+  hosts() {
+    return readHosts(this.config).hosts;
+  }
+
+  /** Inject-time hook: supply the profile config writer ({ entry, editor }) for host CRUD. */
+  setConfigWriter(writer) {
+    this.configWriter = writer && typeof writer === 'object' ? writer : null;
   }
 
   /** Inject-time hook: supply the workspaceRegistry lookup (defaults to lazy ctx.get). */
@@ -85,21 +101,58 @@ export class SshRemoteService extends Service {
     this.resolveWorkspaceRegistry = typeof fn === 'function' ? fn : () => undefined;
   }
 
-  /** Current hosts state: resolved dict (UNREDACTED, dsh-ssh-hosts → dsh-ssh-hosts read fallback), scope revision, writability. */
+  /**
+   * Current hosts state: resolved dict (UNREDACTED), writability, and the revision the
+   * editor echoes back on save. Revision stays in the wire contract for compatibility
+   * with existing clients; the profile patch is now the optimistic-concurrency guard,
+   * so it is reported as 0 rather than tracked here.
+   */
   readState() {
-    const api = this.settingsApi;
-    const { hosts } = readHostsDoc(api && typeof api.get === 'function' ? (ns) => api.get(ns) : null);
-    let revision = 0;
-    try {
-      const desc = api?.describe?.() ?? [];
-      const found = Array.isArray(desc) ? desc.find((d) => d && d.ns === HOSTS_NAMESPACE) : undefined;
-      if (found && typeof found.revision === 'number') revision = found.revision;
-    } catch {
-      revision = 0;
+    return { hosts: readHosts(this.config).hosts, revision: 0, writable: this.configWriter !== null };
+  }
+
+  /**
+   * Atomically read-modify-write the hosts dict through the profile config editor.
+   * `mutate` receives the CURRENT hosts dict (re-read inside the serialized section, so a
+   * concurrent edit is composed rather than clobbered) and returns the next one, or null
+   * to leave the config untouched. Writes commit in submission order, and a failed write
+   * does not block later ones.
+   * @returns { ok: true, persisted: boolean } — persisted is false when the deployment
+   *   has no configuration editor, in which case the write is refused rather than
+   *   reported as durable.
+   */
+  async writeHosts(mutate, verb) {
+    const writer = this.configWriter;
+    if (!writer) {
+      // No configuration editor: nothing to persist against. Report it instead of
+      // pretending the save landed, so the caller can tell the user.
+      throw new Error(verb + '失败: 当前部署没有配置编辑器(configEditor), 主机配置无法持久化');
     }
-    let writable = true;
-    try { writable = api ? !!api.writable : true; } catch { writable = true; }
-    return { hosts, revision, writable };
+    const run = this.saves.then(async () => {
+      const current = readHosts(this.config).hosts;
+      const nextHosts = mutate(current);
+      if (nextHosts === null || nextHosts === undefined) return false; // no-op
+      if (this.hostsEqual(current, nextHosts)) return false;
+      await writer.editor.edit(writer.entry, (raw = {}) => ({ ...raw, hosts: nextHosts }));
+      return true;
+    });
+    this.saves = run.catch(() => {}); // a failed save must not block later ones
+    let wrote;
+    try {
+      wrote = await run;
+    } catch (error) {
+      throw this.wrapWriteError(error, verb);
+    }
+    return { ok: true, persisted: wrote };
+  }
+
+  /** Structural comparison of two hosts dicts (cheap guard against no-op writes). */
+  hostsEqual(a, b) {
+    try {
+      return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+    } catch {
+      return false;
+    }
   }
 
   /** Map a settings write rejection to a clear, wire-safe error (conflict = retry hint). */
@@ -150,50 +203,34 @@ export class SshRemoteService extends Service {
    *          with SETTINGS_CONFLICT so the client can prompt a refresh.
    * The patch is merged over the stored entry with the write-only-password
    * semantics (blank = keep stored; switch to key = clear), re-validated
-   * host-side (remote values are not trusted), then written as one settings
-   * mutate set-op. @returns { ok: true }
+   * host-side (remote values are not trusted), then written as the full host dict.
+   * @returns { ok: true, persisted }
    */
   async saveHost(id, patch, revision) {
     const hostId = id != null ? String(id) : '';
     if (!hostId) throw new Error('saveHost: host id is required');
-    const api = this.settingsApi;
-    if (!api) throw new Error('saveHost: settings service unavailable');
-    const { hosts } = this.readState();
-    const next = mergeHostPatch(hosts[hostId], patch, hostId);
-    const checked = validateHostConfig(next);
-    if (!checked.ok) throw new Error('saveHost: 主机配置无效 (' + formatHostErrors(checked.errors) + ')');
-    // Full write: commit the entire validated host dict (including hosts still only in
-    // the legacy namespace) as one atomic set into the new namespace, so the first edit
-    // loses no already-configured host during the dssh-hosts → dsh-ssh-hosts rename.
-    const nextHosts = { ...hosts, [hostId]: next };
-    try {
-      await api.mutate(HOSTS_NAMESPACE, [{ op: 'set', path: ['hosts'], value: nextHosts }], revision);
-    } catch (error) {
-      throw this.wrapWriteError(error, '保存主机');
-    }
-    return { ok: true };
+    return this.writeHosts((hosts) => {
+      const next = mergeHostPatch(hosts[hostId], patch, hostId);
+      const checked = validateHostConfig(next);
+      if (!checked.ok) throw new Error('saveHost: 主机配置无效 (' + formatHostErrors(checked.errors) + ')');
+      // Full write: commit the entire validated host dict at once, so a save never drops
+      // a host that another form section left untouched.
+      return { ...hosts, [hostId]: next };
+    }, '保存主机');
   }
 
   /**
-   * Delete one host entry (settings mutate unset of ['hosts', id]). Missing
-   * ids are idempotent. revision is the same optimistic-concurrency guard as
-   * saveHost. @returns { ok: true }
+   * Delete one host entry. Missing ids are idempotent. @returns { ok: true, persisted }
    */
   async deleteHost(id, revision) {
     const hostId = id != null ? String(id) : '';
     if (!hostId) throw new Error('deleteHost: host id is required');
-    const api = this.settingsApi;
-    if (!api) throw new Error('deleteHost: settings service unavailable');
-    const { hosts } = this.readState();
-    if (!Object.prototype.hasOwnProperty.call(hosts, hostId)) return { ok: true };
-    const nextHosts = { ...hosts };
-    delete nextHosts[hostId];
-    try {
-      await api.mutate(HOSTS_NAMESPACE, [{ op: 'set', path: ['hosts'], value: nextHosts }], revision);
-    } catch (error) {
-      throw this.wrapWriteError(error, '删除主机');
-    }
-    return { ok: true };
+    return this.writeHosts((hosts) => {
+      if (!Object.prototype.hasOwnProperty.call(hosts, hostId)) return null; // nothing to do
+      const nextHosts = { ...hosts };
+      delete nextHosts[hostId];
+      return nextHosts;
+    }, '删除主机');
   }
 
   // ---------- Remote directory browsing + placeholder creation ----------
@@ -375,22 +412,24 @@ export class SshRemoteService extends Service {
 
 /**
  * Register the remote service + typert contribution on a host ctx that already
- * owns the sshPool service. The typert registry and settings provider are
- * reached through ctx.inject so activation never blocks on them.
+ * owns the sshPool service. Reading goes through the plugin's own config; writing
+ * needs the profile's config editor, so both are reached through ctx.inject and
+ * activation never blocks on them.
  */
-export function registerRemote(ctx, sshPool) {
-  const service = new SshRemoteService(ctx, sshPool);
-  ctx.inject(['typert', 'settings'], (scope) => {
-    service.setSettingsApi(scope.settings);
-    service.setStoredResolver((id) => {
-      if (!id) return undefined;
-      try {
-        const { hosts } = readHostsDoc((ns) => scope.settings.get(ns));
-        return hosts[id] ?? undefined;
-      } catch {
-        return undefined;
-      }
-    });
+export function registerRemote(ctx, sshPool, config) {
+  const service = new SshRemoteService(ctx, sshPool, config);
+  // The config editor owns the profile patch that holds this plugin's row. It is
+  // injected separately from typert: a deployment without a configuration editor
+  // still serves reads and rejects writes with a clear error.
+  ctx.inject(['configEditor'], (scope) => {
+    const entry = ctx.fiber?.entry;
+    if (entry === undefined) return; // not a profile row (e.g. a programmatic mount)
+    service.setConfigWriter({ entry, editor: scope.configEditor });
+  });
+  ctx.inject(['typert'], (scope) => {
+    // Connection endpoints resolve the stored (unredacted) host from this service's own
+    // config, so a password-auth host works even when the form left the password blank.
+    service.setStoredResolver((id) => service.host(id));
     // Fail fast on a malformed contribution instead of a silent gateway miss.
     assertContributionShape(HOST_TYPERT_CONTRIBUTION);
     scope.typert.register(HOST_TYPERT_CONTRIBUTION);

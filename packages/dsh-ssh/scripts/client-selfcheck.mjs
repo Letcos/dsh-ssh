@@ -1,9 +1,52 @@
 
 // PREREQ: run from the repo root (reads packages/dsh-ssh/client.js). No remote/network needed.
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 
 const code = readFileSync('packages/dsh-ssh/client.js', 'utf8');
+
+// Locate the @deepseek-ai/dsh-client-ui-primitives entry shipped with the DSH that runs
+// this repo. An explicit override wins; otherwise probe the local resolution chain and
+// the global npm root.
+function resolvePrimitivesEntry() {
+  const override = process.env.DSH_SSH_PRIMITIVES_ENTRY;
+  if (override) return existsSync(override) ? override : null;
+  const require_ = createRequire(import.meta.url);
+  const probes = [];
+  try {
+    probes.push(require_.resolve('@deepseek-ai/dsh/package.json'));
+  } catch { /* dsh not resolvable from here */ }
+  try {
+    // shell:true because npm is a .cmd shim on Windows.
+    const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', shell: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (globalRoot) probes.push(path.join(globalRoot, '@deepseek-ai', 'dsh', 'package.json'));
+  } catch { /* npm unavailable */ }
+  for (const pkgPath of probes) {
+    const candidate = path.join(path.dirname(pkgPath), 'node_modules', '@deepseek-ai', 'dsh-client-ui-primitives', 'lib', 'index.js');
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+// Names the primitives bundle exports, read from its final `export { ... }` statement.
+// The bundle imports react, so it is parsed as text rather than imported.
+function readPrimitivesExports() {
+  const entry = resolvePrimitivesEntry();
+  if (!entry) return null;
+  let source;
+  try { source = readFileSync(entry, 'utf8'); } catch { return null; }
+  const names = new Set();
+  for (const match of source.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+    for (const raw of match[1].split(',')) {
+      const name = raw.trim().split(/\s+as\s+/).pop().trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
+    }
+  }
+  return names.size > 0 ? names : null;
+}
 
 // minimal react + primitives stubs so the factory body parses and runs
 const element = (type, props, ...children) => ({ type, props, children });
@@ -15,9 +58,20 @@ const reactStub = {
   Fragment: 'Fragment',
 };
 const required = new Set();
+const missing = [];
+// The primitives namespace is resolved from the INSTALLED DSH when one is reachable,
+// so a renamed or removed primitive (e.g. the size-suffixed icons dropped in
+// 0.2.0-rc.2) fails this check instead of silently reaching the browser as undefined.
+// With no installed DSH the stub stays permissive: catch drift where it is observable,
+// not make the check unusable offline.
+const primitivesExports = readPrimitivesExports();
 const primitivesStub = new Proxy({}, {
   get: (t, key) => {
     if (typeof key !== 'string') return undefined;
+    if (primitivesExports && !primitivesExports.has(key)) {
+      missing.push(key);
+      return undefined;
+    }
     return (props) => element(key, props);
   },
 });
@@ -41,6 +95,9 @@ const mod = loaded.factory(requireStub);
 assert.equal(typeof mod.apply, 'function', 'factory must export apply');
 assert.deepEqual([...mod.inject], ['slots', 'locale', 'remote', 'remote.directoryPicker']);
 assert.deepEqual([...required], ['react', '@deepseek-ai/dsh-client-ui-primitives']);
+// Names read off the primitives namespace must exist in the installed DSH: an undefined
+// component reaches React.createElement and throws at render time in the browser.
+assert.deepEqual(missing, [], 'client.js reads primitives the installed DSH does not export: ' + missing.join(', '));
 
 // The inline Typert client descriptors must mirror lib/typert-contribution.js
 // (method + wire parameter list), or saveHost/deleteHost arg counts drift and
@@ -77,3 +134,10 @@ console.log('client.js static self-check OK');
 console.log('  id =', loaded.id);
 console.log('  inject =', JSON.stringify(mod.inject));
 console.log('  requires =', JSON.stringify([...required]));
+// Without a resolvable DSH the primitives check above cannot run, so say so loudly
+// rather than implying the exports were verified.
+if (primitivesExports) {
+  console.log('  primitives exports verified against the installed DSH (' + primitivesExports.size + ' exports)');
+} else {
+  console.log('  WARNING: no installed DSH found, primitives names were NOT verified (set DSH_SSH_PRIMITIVES_ENTRY to check)');
+}

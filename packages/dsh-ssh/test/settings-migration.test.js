@@ -1,100 +1,92 @@
-// @dsh-ssh/dsh-ssh — settings namespace migration tests (dssh-hosts -> dsh-ssh-hosts).
-// Verifies: read fallback (new empty + old data -> read old), write side fully writes to new namespace, existing hosts preserved.
+// @dsh-ssh/dsh-ssh — config persistence and legacy-migration tests.
+// Hosts persist as this plugin's own profile-patch config (entry id dsh-ssh-hosts), and
+// dsh-settings migrates a legacy settings.yaml section into the entry with that id. These
+// tests cover the entry id that makes that migration land, and the write path that
+// persists a full host dict without dropping hosts another form section left untouched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Context } from '@deepseek-ai/cordis';
-import { HOSTS_NAMESPACE, LEGACY_HOSTS_NAMESPACE, readHostsDoc } from '../src/settings.js';
+import { HOSTS_ENTRY_ID } from '../src/settings.js';
 import { SshRemoteService } from '../src/remote.js';
 
-test('renamed namespaces: new dsh-ssh-hosts / old dssh-hosts (read-only migration source)', () => {
-  assert.equal(String(HOSTS_NAMESPACE), 'dsh-ssh-hosts');
-  assert.equal(String(LEGACY_HOSTS_NAMESPACE), 'dssh-hosts');
-});
-
-test('readHostsDoc: new namespace has hosts -> prefers new, legacy=false', () => {
-  const get = (ns) => (ns === 'dsh-ssh-hosts' ? { hosts: { a: { id: 'a' } } } : { hosts: { b: { id: 'b' } } });
-  const { hosts, legacy } = readHostsDoc(get);
-  assert.equal(legacy, false);
-  assert.deepEqual(Object.keys(hosts), ['a']);
-});
-
-test('readHostsDoc: new empty + old data -> fallback to old, legacy=true', () => {
-  const get = (ns) => (ns === 'dssh-hosts' ? { hosts: { b: { id: 'b' } } } : undefined);
-  const { hosts, legacy } = readHostsDoc(get);
-  assert.equal(legacy, true);
-  assert.deepEqual(Object.keys(hosts), ['b']);
-});
-
-test('readHostsDoc: both empty -> empty dict, legacy=false', () => {
-  const { hosts, legacy } = readHostsDoc(() => undefined);
-  assert.equal(legacy, false);
-  assert.deepEqual(hosts, {});
-});
-
-test('readHostsDoc: get throws -> fallback to empty dict (no throw)', () => {
-  const { hosts, legacy } = readHostsDoc(() => { throw new Error('boom'); });
-  assert.equal(legacy, false);
-  assert.deepEqual(hosts, {});
-});
-
-test('saveHost first edit: all old namespace hosts migrate to new namespace, existing hosts preserved', async () => {
-  const ctx = new Context();
-  const svc = new SshRemoteService(ctx, { testConnection: async () => ({ ok: false, error: 'x' }) });
-  // New namespace empty; old namespace has two hosts hA/hB.
-  let newDoc = { hosts: {} };
-  const legacyDoc = {
-    hosts: {
-      hA: { id: 'hA', name: 'A', host: 'a', port: 22, user: 'u', auth: { type: 'key' } },
-      hB: { id: 'hB', name: 'B', host: 'b', port: 22, user: 'u', auth: { type: 'key' } },
+/** Config + configEditor double mirroring the real ref-read / editor-write split. */
+function makeConfigDouble(initialHosts) {
+  const state = { config: { hosts: { ...(initialHosts ?? {}) } } };
+  state.editor = {
+    lastWrite: null,
+    async edit(entry, change) {
+      const next = change({ ...state.config, hosts: { ...state.config.hosts } }, {});
+      this.lastWrite = next.hosts;
+      state.config.hosts = { ...next.hosts };
     },
   };
-  let revision = 0;
-  svc.setSettingsApi({
-    get: (ns) => (ns === 'dsh-ssh-hosts' ? newDoc : ns === 'dssh-hosts' ? legacyDoc : undefined),
-    describe: () => [{ ns: 'dsh-ssh-hosts', revision }],
-    writable: true,
-    async mutate(ns, ops) {
-      assert.equal(ns, 'dsh-ssh-hosts');
-      for (const op of ops) {
-        if (op.op === 'set' && op.path.length === 1 && op.path[0] === 'hosts') newDoc.hosts = { ...op.value };
-      }
-      revision += 1;
-    },
-  });
+  state.entry = { options: { id: HOSTS_ENTRY_ID } };
+  return state;
+}
 
-  // Edit hA -> write side fully writes to new namespace, hB migrates together.
+function makeService(double) {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, { testConnection: async () => ({ ok: false, error: 'x' }) }, double.config);
+  svc.setConfigWriter({ entry: double.entry, editor: double.editor });
+  return { ctx, svc };
+}
+
+test('the migration entry id matches the legacy settings.yaml section name', () => {
+  // dsh-settings resolves a legacy section through LEGACY_SECTION_ENTRIES[section] ?? section,
+  // and only imports when a live entry with that id exists. Renaming it silently drops
+  // every previously-configured host, so the id is a compatibility contract.
+  assert.equal(String(HOSTS_ENTRY_ID), 'dsh-ssh-hosts');
+});
+
+test('saveHost writes the whole host dict so a peer host is never dropped', async () => {
+  const double = makeConfigDouble({
+    hA: { id: 'hA', name: 'A', host: 'a', port: 22, user: 'u', auth: { type: 'key' } },
+    hB: { id: 'hB', name: 'B', host: 'b', port: 22, user: 'u', auth: { type: 'key' } },
+  });
+  const { ctx, svc } = makeService(double);
   await svc.saveHost('hA', { id: 'hA', name: 'A2', host: 'a', port: 22, user: 'u', auth: { type: 'key' } }, 0);
-  assert.deepEqual(Object.keys(newDoc.hosts).sort(), ['hA', 'hB']);
-  assert.equal(newDoc.hosts.hA.name, 'A2');
-  assert.equal(newDoc.hosts.hB.name, 'B'); // old host preserved
+  assert.deepEqual(Object.keys(double.editor.lastWrite).sort(), ['hA', 'hB']);
+  assert.equal(double.editor.lastWrite.hA.name, 'A2');
+  assert.equal(double.editor.lastWrite.hB.name, 'B'); // untouched host preserved
   ctx.dispose?.();
 });
 
-test('deleteHost first delete (old namespace has data): remaining old hosts migrate to new namespace', async () => {
-  const ctx = new Context();
-  const svc = new SshRemoteService(ctx, { testConnection: async () => ({ ok: false, error: 'x' }) });
-  let newDoc = { hosts: {} };
-  const legacyDoc = {
-    hosts: {
-      hA: { id: 'hA', name: 'A', host: 'a', port: 22, user: 'u', auth: { type: 'key' } },
-      hB: { id: 'hB', name: 'B', host: 'b', port: 22, user: 'u', auth: { type: 'key' } },
-    },
-  };
-  let revision = 0;
-  svc.setSettingsApi({
-    get: (ns) => (ns === 'dsh-ssh-hosts' ? newDoc : ns === 'dssh-hosts' ? legacyDoc : undefined),
-    describe: () => [{ ns: 'dsh-ssh-hosts', revision }],
-    writable: true,
-    async mutate(ns, ops) {
-      assert.equal(ns, 'dsh-ssh-hosts');
-      for (const op of ops) {
-        if (op.op === 'set' && op.path.length === 1 && op.path[0] === 'hosts') newDoc.hosts = { ...op.value };
-      }
-      revision += 1;
-    },
-  });
+test('saveHost edit preserves every other host in a multi-host config', async () => {
+  const double = makeConfigDouble({ h1: { id: 'h1', name: 'one', host: 'a', user: 'u' } });
+  const { ctx, svc } = makeService(double);
+  await svc.saveHost('h2', { id: 'h2', name: 'two', host: 'b', user: 'u', auth: { type: 'key' } }, 0);
+  assert.deepEqual(Object.keys(double.editor.lastWrite).sort(), ['h1', 'h2']);
+  ctx.dispose?.();
+});
 
+test('deleteHost leaves the remaining hosts in place', async () => {
+  const double = makeConfigDouble({
+    hA: { id: 'hA', name: 'A', host: 'a', port: 22, user: 'u', auth: { type: 'key' } },
+    hB: { id: 'hB', name: 'B', host: 'b', port: 22, user: 'u', auth: { type: 'key' } },
+  });
+  const { ctx, svc } = makeService(double);
   await svc.deleteHost('hA', 0);
-  assert.deepEqual(Object.keys(newDoc.hosts), ['hB']); // hA deleted, hB migrated and retained
+  assert.deepEqual(Object.keys(double.editor.lastWrite), ['hB']);
+  ctx.dispose?.();
+});
+
+test('a save with no configuration editor reports writable=false and refuses to persist', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, {}, { hosts: {} });
+  assert.equal(svc.listHosts().writable, false);
+  await assert.rejects(
+    () => svc.saveHost('h1', { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } }, 0),
+    /没有配置编辑器/,
+  );
+  ctx.dispose?.();
+});
+
+test('an unchanged save is a no-op rather than a redundant profile write', async () => {
+  const existing = { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' } };
+  const double = makeConfigDouble({ h1: { ...existing } });
+  const { ctx, svc } = makeService(double);
+  const result = await svc.saveHost('h1', { ...existing }, 0);
+  assert.deepEqual(result, { ok: true, persisted: false }); // live value unchanged, no write
+  assert.equal(double.editor.lastWrite, null);
   ctx.dispose?.();
 });

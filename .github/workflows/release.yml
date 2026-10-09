@@ -63,8 +63,23 @@ jobs:
           node --test test/*.test.js
 
       # 客户端静态自检 (从仓库根运行, 仅依赖 node 内置 + stubs, 无需外部包)。
+      # 当找不到已安装的 DSH 时, primitives 名称校验降级为警告 (不失败)。
       - name: client-selfcheck
         run: node packages/dsh-ssh/scripts/client-selfcheck.mjs
+
+      # Typert 描述符契约自检: strict codec 必须提供 create() -> schema{parse}。
+      # 纯数据检查, 不需要 DSH 运行时, 守护 "has no create() factory" 这类挂载期失败。
+      - name: typert contribution selfcheck
+        run: |
+          cd packages/dsh-ssh
+          node -e "
+          import('./lib/typert-contribution.js').then((m) => {
+            m.assertContributionShape(m.HOST_TYPERT_CONTRIBUTION);
+            m.assertContributionShape(m.CLIENT_TYPERT_REMOTE);
+            if (!m.allClientCodecsStrict(m.CLIENT_TYPERT_REMOTE.descriptors)) throw new Error('client codecs must be strict');
+            console.log('typert contribution shape OK');
+          });
+          "
 
       # tag 版本必须与 packages/dsh-ssh/package.json 的 version 一致, 否则失败阻止发布。
       - name: Verify tag matches package.json version

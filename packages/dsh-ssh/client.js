@@ -34,16 +34,19 @@ window.__ModuleLoader__.load({
     var primitives = require("@deepseek-ai/dsh-client-ui-primitives");
     var Button = primitives.Button;
     var Input = primitives.Input;
-    var IconPlusOutline16 = primitives.IconPlusOutline16;
-    var IconEditOutline16 = primitives.IconEditOutline16;
-    var IconTrashOutline16 = primitives.IconTrashOutline16;
-    var IconCheckOutline16 = primitives.IconCheckOutline16;
-    var IconWarningOutline16 = primitives.IconWarningOutline16;
-    var IconRefreshOutline16 = primitives.IconRefreshOutline16;
-    var IconCloseOutline16 = primitives.IconCloseOutline16;
-    var IconLoadingOutline16 = primitives.IconLoadingOutline16;
-    var IconFolderClose16 = primitives.IconFolderClose16;
-    var IconChevronDownOutline14 = primitives.IconChevronDownOutline14;
+    // Product icons are named for stroke weight, not pixel size: each artwork carries
+    // its own default size, so "Regular" (1px stroke) matches what the previous
+    // size-suffixed names drew. Explicit size props at the call sites still apply.
+    var IconPlusOutline = primitives.IconPlusOutlineRegular;
+    var IconEditOutline = primitives.IconEditOutlineRegular;
+    var IconTrashOutline = primitives.IconTrashOutlineRegular;
+    var IconCheckOutline = primitives.IconCheckOutlineRegular;
+    var IconWarningOutline = primitives.IconWarningOutlineRegular;
+    var IconRefreshOutline = primitives.IconRefreshOutlineRegular;
+    var IconCloseOutline = primitives.IconCloseOutlineRegular;
+    var IconLoadingOutline = primitives.IconLoadingOutlineRegular;
+    var IconFolderClose = primitives.IconFolderCloseRegular;
+    var IconChevronDownOutline = primitives.IconChevronDownOutlineRegular;
     var Menu = primitives.Menu;
     var Modal = primitives.Modal;
     var StateDot = primitives.StateDot;
@@ -377,11 +380,20 @@ window.__ModuleLoader__.load({
 
     // ---------- Typert client remote (inline copy of lib/typert-contribution.js) ----------
     // Client-side $mount REQUIRES strict codecs (dsh-api-gateway/lib/client.js
-    // requireStrictCodec); the schema is a JSON passthrough because values are
-    // already validated host-side (hosts-model.validateHostConfig + settings
-    // schema + ssh-core) and the gateway re-asserts JSON-safety on the wire.
+    // requireStrictCodec); the codec materializes its schema through create() and the
+    // schema is a JSON passthrough because values are already validated host-side
+    // (hosts-model.validateHostConfig + settings schema + ssh-core) and the gateway
+    // re-asserts JSON-safety on the wire. The instance is cached across calls.
     function strictCodec(typeSymbol) {
-      return { mode: 'strict', typeSymbol: typeSymbol, schema: { parse: function (value) { return value; } } };
+      var schema = null;
+      return {
+        mode: 'strict',
+        typeSymbol: typeSymbol,
+        create: function () {
+          if (schema === null) schema = { parse: function (value) { return value; } };
+          return schema;
+        },
+      };
     }
     function remoteDescriptor(method, params, resultType) {
       return {
@@ -883,7 +895,7 @@ window.__ModuleLoader__.load({
           "aria-label": dismissLabel,
           onClick: props.onDismiss,
           style: { border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: 0, flex: "none" }
-        }, React.createElement(IconCloseOutline16, { size: 14 })) : null
+        }, React.createElement(IconCloseOutline, { size: 14 })) : null
       );
     }
 
@@ -951,7 +963,7 @@ window.__ModuleLoader__.load({
             React.createElement('span', { className: 'dsh-trust-fp', title: info.fingerprint }, info.fingerprint || ''),
             React.createElement(Button, {
               variant: 'ghost', size: 'sm', onClick: copyFingerprint,
-              icon: copied ? React.createElement(IconCheckOutline16, { size: 14 }) : null
+              icon: copied ? React.createElement(IconCheckOutline, { size: 14 }) : null
             }, copied ? t('trust.copied') : t('trust.copy'))
           ),
           info.error ? React.createElement(StatusNote, { state: 'error', text: t('trust.error') + ': ' + info.error }) : null,
@@ -959,7 +971,7 @@ window.__ModuleLoader__.load({
             React.createElement(Button, { variant: 'outline', size: 'sm', disabled: info.trusting, onClick: props.onCancel }, t('trust.cancel')),
             React.createElement(Button, {
               variant: 'primary', size: 'sm', disabled: info.trusting,
-              icon: info.trusting ? React.createElement(IconLoadingOutline16, { size: 14 }) : null,
+              icon: info.trusting ? React.createElement(IconLoadingOutline, { size: 14 }) : null,
               onClick: props.onTrust
             }, info.trusting ? t('trust.trusting') : t('trust.trust'))
           )
@@ -984,7 +996,7 @@ window.__ModuleLoader__.load({
         variant: "outline",
         size: "sm",
         disabled: testing,
-        icon: testing ? React.createElement(IconLoadingOutline16, { size: 14 }) : React.createElement(IconRefreshOutline16, { size: 14 }),
+        icon: testing ? React.createElement(IconLoadingOutline, { size: 14 }) : React.createElement(IconRefreshOutline, { size: 14 }),
         onClick: function () { props.testConnection(id); },
         "data-test-connection": id
       }, testing ? t("testing") : t("test"));
@@ -1002,13 +1014,13 @@ window.__ModuleLoader__.load({
             React.createElement(Button, {
               variant: "ghost",
               size: "sm",
-              icon: React.createElement(IconEditOutline16, { size: 14 }),
+              icon: React.createElement(IconEditOutline, { size: 14 }),
               onClick: function () { props.beginEdit(id); }
             }, t("edit")),
             React.createElement(Button, {
               variant: "ghost",
               size: "sm",
-              icon: React.createElement(IconTrashOutline16, { size: 14 }),
+              icon: React.createElement(IconTrashOutline, { size: 14 }),
               onClick: function () { props.requestDelete(id); }
             }, t("delete"))
           )
@@ -1046,7 +1058,7 @@ window.__ModuleLoader__.load({
         onClick: function (e) { e.stopPropagation(); setOpen(!open); }
       },
         React.createElement("span", { className: "dsh-select-value" }, selected ? selected.label : (placeholder || "")),
-        React.createElement(IconChevronDownOutline14, { size: 14, className: "dsh-select-chevron" })
+        React.createElement(IconChevronDownOutline, { size: 14, className: "dsh-select-chevron" })
       );
       return React.createElement(Menu, {
         open: open,
@@ -1161,7 +1173,7 @@ window.__ModuleLoader__.load({
         React.createElement("div", { className: "dsh-form-actions" },
           React.createElement(Button, {
             variant: "outline", size: "sm", disabled: state.saving || state.formTesting,
-            icon: state.formTesting ? React.createElement(IconLoadingOutline16, { size: 14 }) : React.createElement(IconRefreshOutline16, { size: 14 }),
+            icon: state.formTesting ? React.createElement(IconLoadingOutline, { size: 14 }) : React.createElement(IconRefreshOutline, { size: 14 }),
             onClick: props.testConnectionForm
           }, state.formTesting ? t("testing") : t("test")),
           React.createElement(Button, { variant: "ghost", size: "sm", onClick: props.cancelForm }, t("cancel")),
@@ -1261,7 +1273,7 @@ window.__ModuleLoader__.load({
             state.form ? null : React.createElement(Button, {
               variant: "outline", size: "sm", disabled: !state.writable,
               className: "dsh-add-btn",
-              icon: React.createElement(IconPlusOutline16, { size: 14 }),
+              icon: React.createElement(IconPlusOutline, { size: 14 }),
               onClick: props.beginAdd
             }, t("add"))
           ),
@@ -1524,7 +1536,7 @@ window.__ModuleLoader__.load({
             onClick: function () { enter(entry); },
             title: entry.path
           }, React.createElement(React.Fragment, null,
-            React.createElement(IconFolderClose16, { size: 14 }),
+            React.createElement(IconFolderClose, { size: 14 }),
             React.createElement('span', { className: 'dsh-remote-row-name' }, entry.name)));
         }));
       }
@@ -1919,7 +1931,7 @@ window.__ModuleLoader__.load({
             var isDir = entry.type === 'dir';
             var inner = isDir
               ? React.createElement(React.Fragment, null,
-                  React.createElement(IconFolderClose16, { size: 14 }),
+                  React.createElement(IconFolderClose, { size: 14 }),
                   React.createElement('span', { className: 'dsh-remote-row-name' }, entry.name))
               : React.createElement('span', { className: 'dsh-remote-row-name dsh-remote-row-file' }, entry.name);
             return React.createElement(isDir ? 'button' : 'div', {
@@ -2103,7 +2115,7 @@ window.__ModuleLoader__.load({
         // Light loading while unresolved (renders no tab content and never pops the
         // system dialog).
         body = React.createElement('div', { className: 'dsh-remote-empty' },
-          React.createElement(IconLoadingOutline16, { size: 14 }), ' ', t('loading'));
+          React.createElement(IconLoadingOutline, { size: 14 }), ' ', t('loading'));
       } else if (tab === 'local') {
         body = React.createElement(LocalFlowBody, Object.assign({}, shared, {
           onPicked: onPicked,
@@ -2469,7 +2481,7 @@ window.__ModuleLoader__.load({
     function sshLeadingFor(state) {
       if (state === "error") return React.createElement(primitives.StateDot, { state: "error" });
       if (state === "stopped") return React.createElement(primitives.StateDot, { state: "warning" });
-      return React.createElement(primitives.IconApiOutline14, { size: 14 });
+      return React.createElement(primitives.IconApiOutlineRegular, { size: 14 });
     }
     function sshStateStatus(state, t) {
       if (state === "running") return t("bash.running");
@@ -2512,11 +2524,11 @@ window.__ModuleLoader__.load({
       };
       var leading;
       if (open) {
-        leading = React.createElement(primitives.IconChevronDownOutline14, { className: SSH_BASH_CSS.chevron });
+        leading = React.createElement(primitives.IconChevronDownOutlineRegular, { className: SSH_BASH_CSS.chevron });
       } else if (expandable) {
         leading = React.createElement(React.Fragment, null,
           React.createElement("span", { className: SSH_BASH_CSS.iconIdle }, sshLeadingFor(state)),
-          React.createElement(primitives.IconChevronDownOutline14, { className: sshCx(SSH_BASH_CSS.chevron, SSH_BASH_CSS.chevronHover) }));
+          React.createElement(primitives.IconChevronDownOutlineRegular, { className: sshCx(SSH_BASH_CSS.chevron, SSH_BASH_CSS.chevronHover) }));
       } else {
         leading = sshLeadingFor(state);
       }
@@ -2563,7 +2575,7 @@ window.__ModuleLoader__.load({
         if (inspect !== void 0) {
           bodyNode = React.createElement(React.Fragment, null, bodyNode,
             React.createElement("button", { type: "button", className: SSH_BASH_CSS.inspectButton, onClick: inspect },
-              React.createElement(primitives.IconInspectOutline12, null), "Inspect"));
+              React.createElement(primitives.IconInspectOutlineRegular, null), "Inspect"));
         }
       }
       return React.createElement("div", { className: SSH_BASH_CSS.card },

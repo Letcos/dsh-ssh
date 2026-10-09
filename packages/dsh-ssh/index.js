@@ -1,31 +1,45 @@
 // @dsh-ssh/dsh-ssh — DeepSeek Harness SSH remote workspace plugin (host half).
-// Provides the sshPool service (SshPool over ssh2), registers the dsh-ssh-hosts
-// settings namespace for SSH host configuration, and exposes ssh/testConnection
-// over the official Typert gateway for the settings-page "test connection" button
-// (the UI lives client-side).
+// Provides the sshPool service (SshPool over ssh2), owns the SSH host configuration in
+// its own Config schema (see src/settings.js), and exposes ssh/testConnection over the
+// official Typert gateway for the settings-page "test connection" button (the UI lives
+// client-side).
 import { Service } from '@deepseek-ai/cordis';
 import os from 'node:os';
 import path from 'node:path';
 import { rm } from 'node:fs/promises';
 import { SshPool } from './src/ssh-core.js';
-import { registerSettings, readHostsDoc } from './src/settings.js';
+import { SshConfigSchema, readHosts, resolveHostFromConfig, HOSTS_ENTRY_ID } from './src/settings.js';
 import { registerRemote } from './src/remote.js';
 import { routeByCwd } from './src/router.js';
 import { registerRoutedTools, ROUTED_TOOL_NAMES } from './tools.js';
 
 export const name = '@dsh-ssh/dsh-ssh';
 
+// The plugin's own config: pool sizing plus the hosts dict the settings page edits.
+export const Config = SshConfigSchema;
+
 // Cordis Service: super(ctx, 'sshPool') registers ctx.sshPool on this fiber.
 export class SshPoolService extends Service {
+  static Config = SshConfigSchema;
+
   constructor(ctx, config) {
     super(ctx, 'sshPool');
     this.pool = new SshPool(config);
+    // The resolved config holds the volatile refs, so reading through it always sees
+    // the current values — including edits committed while the plugin stays mounted.
+    this.config = config ?? {};
   }
 
   acquire(cfg) { return this.pool.acquire(cfg); }
   release(conn) { return this.pool.release(conn); }
   invalidate(hostId) { return this.pool.invalidate(hostId); }
   testConnection(cfg) { return this.pool.testConnection(cfg); }
+
+  /** Current hosts dict (unredacted), read live from this plugin's config. */
+  hosts() { return readHosts(this.config).hosts; }
+
+  /** One stored HostConfig by id, or undefined. */
+  host(hostId) { return resolveHostFromConfig(this.config, hostId); }
 }
 
 // Subscribe to workspace domain/changed so deleting a workspace record also cleans
@@ -171,15 +185,12 @@ export function injectCapabilitySurface(agent, route, opts = {}) {
   }
 }
 
-// Best-effort host display name (the settings read is only a hint; falls back to hostId
-// on failure; the caller wraps this in try/catch).
-export function resolveHostLabel(ctx, hostId) {
-  if (!hostId || !ctx) return null;
+// Best-effort host display name, read from the live plugin config (the label is only a
+// hint; falls back to hostId on failure; the caller wraps this in try/catch).
+export function resolveHostLabel(config, hostId) {
+  if (!hostId || !config) return null;
   try {
-    const get = ctx.settings && typeof ctx.settings.get === 'function' ? (ns) => ctx.settings.get(ns) : null;
-    if (!get) return null;
-    const { hosts } = readHostsDoc(get);
-    const entry = hosts[hostId];
+    const entry = resolveHostFromConfig(config, hostId);
     return (entry && typeof entry.name === 'string' && entry.name) ? (entry.name + ' (' + hostId + ')') : null;
   } catch {
     return null;
@@ -193,6 +204,7 @@ export function resolveHostLabel(ctx, hostId) {
  */
 export function installToolRoutingHook(ctx, opts = {}) {
   const names = opts.names ?? ROUTED_TOOL_NAMES;
+  const config = opts.config ?? {};
   const handler = ({ agent }) => {
     try {
       const cwd = agent?.session?.header?.cwd;
@@ -213,7 +225,7 @@ export function installToolRoutingHook(ctx, opts = {}) {
       // that agent's scope via the official agent.ctx.systemPrompt.section() per-agent channel.
       let capabilityInjected = false;
       if (opts.capability !== false) {
-        const hostLabel = resolveHostLabel(ctx, route.hostId) || route.hostId;
+        const hostLabel = resolveHostLabel(config, route.hostId) || route.hostId;
         const injectOpts = { hostLabel: hostLabel, zh: opts.zh, section: opts.section };
         if (injectCapabilitySurface(agent, route, injectOpts)) capabilityInjected = true;
       }
@@ -248,12 +260,11 @@ export function apply(ctx, config = {}) {
   const svc = new SshPoolService(ctx, config);
   // Pool disposal follows the plugin fiber teardown (Service registration is removed with the fiber).
   ctx.effect(() => () => svc.pool.dispose());
-  ctx.inject(['settings'], (settingsCtx) => {
-    registerSettings(settingsCtx);
-  });
-  // Host-side Typert endpoint for the settings-page "test connection" (injects typert/settings itself).
-  registerRemote(ctx, svc);
+  // Host-side Typert endpoint for the settings-page host CRUD and "test connection"
+  // (injects typert/settings itself); reads hosts straight off the live plugin config.
+  registerRemote(ctx, svc, config);
   installPlaceholderCleanup(ctx);
-  installToolRoutingHook(ctx);
-  ctx.logger.info('[@dsh-ssh/dsh-ssh] loaded: sshPool service (maxConnections=' + (config.maxConnections ?? 4) + ', maxChannelsPerConnection=' + (config.maxChannelsPerConnection ?? 6) + ') + settings dsh-ssh-hosts + remote ssh/* + placeholder cleanup + agent/created tool routing');
+  installToolRoutingHook(ctx, { config });
+  const hosts = Object.keys(readHosts(config).hosts).length;
+  ctx.logger.info('[@dsh-ssh/dsh-ssh] loaded: sshPool service (maxConnections=' + (config.maxConnections ?? 4) + ', maxChannelsPerConnection=' + (config.maxChannelsPerConnection ?? 6) + ') + ' + hosts + ' host(s) in config ' + HOSTS_ENTRY_ID + ' + remote ssh/* + placeholder cleanup + agent/created tool routing');
 }

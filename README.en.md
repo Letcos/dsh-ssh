@@ -81,7 +81,7 @@ In a remote workspace, only the seven routed tools execute on the remote host:
 | Windows remote | Not supported (Linux / macOS only) |
 | Preset | Any preset, including the standard one — independent of presets |
 
-> **Requirements**: Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies (`@deepseek-ai/cordis@^4.0.1`, `@deepseek-ai/dsh-*@^0.1.1-rc.2`, `@deepseek-ai/schemastery@^3.18.1` — see `packages/dsh-ssh/package.json`)
+> **Requirements**: Node ≥ 22 · pnpm 11.21.0 · DSH peerDependencies (`@deepseek-ai/cordis@^4.0.1`, `@deepseek-ai/dsh-*@^0.2.0-rc.2`, `@deepseek-ai/schemastery@^3.18.4` — see `packages/dsh-ssh/package.json`)
 
 ## Known limitations
 
@@ -97,7 +97,7 @@ In a remote workspace, only the seven routed tools execute on the remote host:
 - **Private key permission error (UNPROTECTED PRIVATE KEY)**: OpenSSH requires `600`/`400` (no group/other read); fix file permissions and path (avoid spaces or CJK characters), and ensure DSH can read it.
 - **SFTP disabled → falls back to exec + base64 (slower)**: if the remote disables SFTP, file ops still work via exec-channel base64 (ExecFs) but large / batch ops are noticeably slower — expected degradation; enable the SFTP subsystem in `sshd_config` to restore speed.
 - **Placeholder directory (`~/.dsh/remote/<hostId>/...`)**: a remote workspace is just a local placeholder (plain workspace record, `workspaceRegistry` does `realpath` check); it holds no business data but must exist and must not be a symlink — do not delete/move it manually, switch via DSH workspace management.
-- **How to collect logs**: tool failures include hostId, the exact remote command, exit code and tail output; combine with `~/.dsh/settings.yaml` (`dsh-ssh-hosts`), DSH console logs, and remote `sshd` logs (`/var/log/auth.log` or `journalctl -u sshd`) and attach sanitized info when filing an issue.
+- **How to collect logs**: tool failures include hostId, the exact remote command, exit code and tail output; combine with the `dsh-ssh-hosts` row in the active profile's `cordis.patch.yml`, DSH console logs, and remote `sshd` logs (`/var/log/auth.log` or `journalctl -u sshd`) and attach sanitized info when filing an issue.
 
 ## FAQ
 

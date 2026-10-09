@@ -94,42 +94,32 @@ test('bindTypertRemote is the exact binding shape the gateway validates', () => 
 
 // ---------- CRUD over the Typert channel (settings wire not exposed) ----------
 
-/** Minimal settings provider double: get/describe/writable/mutate with revision semantics. */
-function makeSettings(initialHosts, legacyHosts) {
-  let doc = { hosts: { ...(initialHosts ?? {}) } };
-  const legacyDoc = { hosts: { ...(legacyHosts ?? {}) } };
-  let revision = 0;
-  return {
-    get: (ns) => (ns === 'dsh-ssh-hosts' ? doc : ns === 'dssh-hosts' ? legacyDoc : undefined),
-    describe: () => [{ ns: 'dsh-ssh-hosts', revision }],
-    writable: true,
+/**
+ * Config double: a live plugin config object plus a configEditor double. The service
+ * reads hosts off the config and writes through editor.edit(entry, change), so the
+ * double mirrors the real ref-based read/write split (src/remote.js writeHosts).
+ */
+function makeSettings(initialHosts) {
+  const config = { hosts: { ...(initialHosts ?? {}) } };
+  const editor = {
     lastWrite: null,
-    async mutate(ns, ops, expectedRevision) {
-      assert.equal(ns, 'dsh-ssh-hosts');
-      if (expectedRevision !== undefined && expectedRevision !== revision) {
-        const err = new Error(`settings namespace "dsh-ssh-hosts" changed since it was read (expected revision ${expectedRevision}, now ${revision})`);
-        err.name = 'SettingsConflictError';
-        err.code = 'SETTINGS_CONFLICT';
-        throw err;
-      }
-      this.lastWrite = { ops, expectedRevision };
-      for (const op of ops) {
-        if (op.op === 'set') {
-          if (op.path.length === 1 && op.path[0] === 'hosts') doc.hosts = { ...op.value };
-          else doc.hosts[op.path[1]] = op.value;
-        } else if (op.op === 'unset') {
-          delete doc.hosts[op.path[1]];
-        }
-      }
-      revision += 1;
+    lastChange: null,
+    failWith: null,
+    async edit(entry, change) {
+      if (this.failWith) throw this.failWith;
+      const next = change({ ...config, hosts: { ...config.hosts } }, {});
+      this.lastChange = next;
+      this.lastWrite = next.hosts;
+      config.hosts = { ...next.hosts };
     },
   };
+  return { config, editor, entry: { options: { id: 'dsh-ssh-hosts' } } };
 }
 
 function makeService(pool, settings) {
   const ctx = new Context();
-  const svc = new SshRemoteService(ctx, pool ?? { testConnection: async () => ({ ok: false, error: 'x' }) });
-  svc.setSettingsApi(settings);
+  const svc = new SshRemoteService(ctx, pool ?? { testConnection: async () => ({ ok: false, error: 'x' }) }, settings?.config);
+  if (settings) svc.setConfigWriter({ entry: settings.entry, editor: settings.editor });
   return { ctx, svc };
 }
 
@@ -146,30 +136,30 @@ test('listHosts returns the REDACTED dict with revision + secrets + writable', (
   assert.equal(result.revision, 0);
   assert.deepEqual(result.secrets, [{ path: ['hosts', 'h1', 'auth', 'password'], set: true }]);
   assert.equal(result.writable, true);
-  assert.equal(settings.get('dsh-ssh-hosts').hosts.h1.auth.password, 's3cret'); // store untouched
+  assert.equal(settings.config.hosts.h1.auth.password, 's3cret'); // store untouched
   ctx.dispose?.();
 });
 
-test('listHosts tolerates a missing settings service (empty state)', () => {
+test('listHosts tolerates a missing config (empty state)', () => {
   const ctx = new Context();
   const svc = new SshRemoteService(ctx, { testConnection: async () => ({ ok: false, error: 'x' }) });
   const result = svc.listHosts();
   assert.deepEqual(result.hosts, {});
   assert.deepEqual(result.secrets, []);
   assert.equal(result.revision, 0);
-  assert.equal(result.writable, true);
+  assert.equal(result.writable, false);
   ctx.dispose?.();
 });
 
-test('saveHost creates a new host (set op, id authoritative, no stored secret)', async () => {
+test('saveHost creates a new host (full dict write, id authoritative, no stored secret)', async () => {
   const settings = makeSettings({});
   const { ctx, svc } = makeService({}, settings);
   const result = await svc.saveHost('h-new', { id: 'spoofed', name: 'n', host: 'h', port: 22, user: 'u', auth: { type: 'key' } }, 0);
-  assert.deepEqual(result, { ok: true });
-  assert.deepEqual(settings.lastWrite.ops, [{ op: 'set', path: ['hosts'], value: { 'h-new': settings.get('dsh-ssh-hosts').hosts['h-new'] } }]);
-  assert.equal(settings.lastWrite.expectedRevision, 0);
-  assert.equal(settings.get('dsh-ssh-hosts').hosts['h-new'].id, 'h-new'); // id forced, patch.id ignored
-  assert.equal(settings.get('dsh-ssh-hosts').hosts['h-new'].name, 'n');
+  assert.deepEqual(result, { ok: true, persisted: true });
+  assert.equal(settings.editor.lastWrite['h-new'].id, 'h-new'); // id forced, patch.id ignored
+  assert.equal(settings.editor.lastWrite['h-new'].name, 'n');
+  assert.equal(settings.editor.lastChange.hosts['h-new'].id, 'h-new'); // id forced, patch.id ignored
+  assert.equal(settings.config.hosts['h-new'].id, 'h-new');
   ctx.dispose?.();
 });
 
@@ -179,7 +169,7 @@ test('saveHost edit keeps the stored password when the patch omits it', async ()
   });
   const { ctx, svc } = makeService({}, settings);
   await svc.saveHost('h1', { id: 'h1', name: 'box2', host: 'h', port: 22, user: 'u', auth: { type: 'password' } }, 0);
-  const saved = settings.get('dsh-ssh-hosts').hosts.h1;
+  const saved = settings.config.hosts.h1;
   assert.equal(saved.name, 'box2');
   assert.deepEqual(saved.auth, { type: 'password', password: 'stored' });
   ctx.dispose?.();
@@ -191,7 +181,7 @@ test('saveHost overwrites the password when the patch carries one', async () => 
   });
   const { ctx, svc } = makeService({}, settings);
   await svc.saveHost('h1', { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'password', password: 'new' } }, 0);
-  assert.deepEqual(settings.get('dsh-ssh-hosts').hosts.h1.auth, { type: 'password', password: 'new' });
+  assert.deepEqual(settings.config.hosts.h1.auth, { type: 'password', password: 'new' });
   ctx.dispose?.();
 });
 
@@ -201,8 +191,8 @@ test('saveHost switching to key auth clears the stored password', async () => {
   });
   const { ctx, svc } = makeService({}, settings);
   await svc.saveHost('h1', { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key', privateKeyPath: '~/.ssh/id' } }, 0);
-  assert.deepEqual(settings.get('dsh-ssh-hosts').hosts.h1.auth, { type: 'key', privateKeyPath: '~/.ssh/id' });
-  assert.equal('password' in settings.get('dsh-ssh-hosts').hosts.h1.auth, false);
+  assert.deepEqual(settings.config.hosts.h1.auth, { type: 'key', privateKeyPath: '~/.ssh/id' });
+  assert.equal('password' in settings.config.hosts.h1.auth, false);
   ctx.dispose?.();
 });
 
@@ -210,46 +200,56 @@ test('saveHost rejects an invalid host config host-side (remote values not trust
   const settings = makeSettings({});
   const { ctx, svc } = makeService({}, settings);
   await assert.rejects(() => svc.saveHost('h1', { name: '', host: 'h', user: 'u', auth: { type: 'key' } }, 0), /主机配置无效/);
-  assert.equal(settings.lastWrite, null); // nothing persisted
+  assert.equal(settings.editor.lastWrite, null); // nothing persisted
   ctx.dispose?.();
 });
 
-test('saveHost rejects a stale revision with a SETTINGS_CONFLICT retry hint', async () => {
-  const settings = makeSettings({ h1: { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } } });
+test('saveHost reports a config-editor failure as a wrapped save error', async () => {
+  const settings = makeSettings({});
+  settings.editor.failWith = Object.assign(new Error('settings conflict'), { code: 'SETTINGS_CONFLICT' });
   const { ctx, svc } = makeService({}, settings);
-  await svc.saveHost('h1', { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } }, 0); // bumps to rev 1
   await assert.rejects(
-    () => svc.saveHost('h1', { id: 'h1', name: 'b', host: 'h', user: 'u', auth: { type: 'key' } }, 0),
+    () => svc.saveHost('h1', { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } }, 0),
     /SETTINGS_CONFLICT.*请刷新后重试/,
   );
   ctx.dispose?.();
 });
 
-test('deleteHost removes the entry via an unset op and is idempotent for missing ids', async () => {
+test('saveHost throws a clear error when no config editor is wired', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, {}, { hosts: {} }); // no setConfigWriter
+  assert.equal(svc.readState().writable, false);
+  await assert.rejects(
+    () => svc.saveHost('h1', { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } }, 0),
+    /没有配置编辑器/,
+  );
+  ctx.dispose?.();
+});
+
+test('deleteHost removes the entry in one full-dict write and is idempotent for missing ids', async () => {
   const settings = makeSettings({ h1: { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } } });
   const { ctx, svc } = makeService({}, settings);
   const missing = await svc.deleteHost('nope', 0);
-  assert.deepEqual(missing, { ok: true });
-  assert.equal(settings.lastWrite, null); // no write for a missing id
+  assert.deepEqual(missing, { ok: true, persisted: false }); // idempotent, nothing written
+  assert.equal(settings.editor.lastWrite, null); // no write for a missing id
 
-  await svc.deleteHost('h1', 0);
-  assert.deepEqual(settings.lastWrite.ops, [{ op: 'set', path: ['hosts'], value: {} }]);
-  assert.equal('h1' in settings.get('dsh-ssh-hosts').hosts, false);
+  const removed = await svc.deleteHost('h1', 0);
+  assert.deepEqual(removed, { ok: true, persisted: true });
+  assert.deepEqual(settings.editor.lastWrite, {});
+  assert.equal('h1' in settings.config.hosts, false);
   ctx.dispose?.();
 });
 
-test('deleteHost rejects a stale revision with a SETTINGS_CONFLICT retry hint', async () => {
-  const settings = makeSettings({ h1: { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } } });
+test('deleteHost serializes concurrent writes in submission order', async () => {
+  const settings = makeSettings({
+    h1: { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } },
+    h2: { id: 'h2', name: 'b', host: 'h', user: 'u', auth: { type: 'key' } },
+  });
   const { ctx, svc } = makeService({}, settings);
-  await svc.saveHost('h1', { id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } }, 0); // rev 1
-  await assert.rejects(() => svc.deleteHost('h1', 0), /SETTINGS_CONFLICT/);
-  ctx.dispose?.();
-});
-
-test('saveHost throws a clear error when no settings service is wired', async () => {
-  const ctx = new Context();
-  const svc = new SshRemoteService(ctx, { testConnection: async () => ({ ok: false, error: 'x' }) });
-  await assert.rejects(() => svc.saveHost('h1', { name: 'a', host: 'h', user: 'u', auth: { type: 'key' } }), /settings service unavailable/);
+  // Both deletes read the same initial state, but writeHosts chains them, so the
+  // second write sees the first one's result rather than clobbering it.
+  await Promise.all([svc.deleteHost('h1', 0), svc.deleteHost('h2', 0)]);
+  assert.deepEqual(Object.keys(settings.config.hosts), []);
   ctx.dispose?.();
 });
 
@@ -265,11 +265,11 @@ function makeBrowsePool(conn, onAcquire) {
   };
 }
 
-/** Service with settings + stored resolver (connection endpoints use resolveStored, placeholder uses settingsApi). */
+/** Service with the plugin config + stored resolver (connection endpoints use resolveStored, placeholder reads config). */
 function makeBrowseService(pool, settings, stored) {
   const ctx = new Context();
-  const svc = new SshRemoteService(ctx, pool ?? { testConnection: async () => ({ ok: false, error: 'x' }) });
-  svc.setSettingsApi(settings);
+  const svc = new SshRemoteService(ctx, pool ?? { testConnection: async () => ({ ok: false, error: 'x' }) }, settings?.config);
+  if (settings) svc.setConfigWriter({ entry: settings.entry, editor: settings.editor });
   svc.setStoredResolver((id) => (stored && stored[id]) || undefined);
   return { ctx, svc };
 }
@@ -295,6 +295,42 @@ test('listRemoteDir rejects a missing remote path and an unconfigured host (SshE
   const { ctx, svc } = makeBrowseService(makeBrowsePool(null), makeSettings({}), {});
   await assert.rejects(() => svc.listRemoteDir('h1', ''), (err) => err instanceof SshError && err.stage === 'sftp-readdir' && /path is required/.test(err.message));
   await assert.rejects(() => svc.listRemoteDir('nope', '/x'), (err) => err instanceof SshError && err.stage === 'resolve-host' && /not configured/.test(err.message));
+  ctx.dispose?.();
+});
+
+// The browse/connection endpoints resolve their host through the service's own config
+// (the resolver registerRemote wires). Without an injected stub this must still work,
+// otherwise opening a remote directory fails with "service.host is not a function".
+test('the service resolves a stored host from its own config (no injected stub)', async () => {
+  let acquired = null;
+  const conn = { sftp: async () => ({ listDir: async () => [] }), fs: async () => ({ listDir: async () => [] }), exec: async () => ({ code: 0, stdout: '', stderr: '' }) };
+  const settings = makeSettings({ h1: M4_HOST });
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, makeBrowsePool(conn, (cfg) => { acquired = cfg; }), settings.config);
+  svc.setConfigWriter({ entry: settings.entry, editor: settings.editor });
+  // Wire the resolver exactly as registerRemote does.
+  svc.setStoredResolver((id) => svc.host(id));
+
+  assert.equal(typeof svc.host, 'function', 'the remote service must resolve hosts itself');
+  assert.equal(svc.host('h1').host, M4_HOST.host);
+  assert.equal(svc.host('nope'), undefined);
+
+  assert.deepEqual(await svc.listRemoteDir('h1', '/data'), []);
+  assert.deepEqual(acquired, { ...M4_HOST, id: 'h1' }); // resolved from the service's own config
+  ctx.dispose?.();
+});
+
+test('the service resolver reads through a volatile config ref', async () => {
+  let acquired = null;
+  const conn = { sftp: async () => ({ listDir: async () => [] }), fs: async () => ({ listDir: async () => [] }), exec: async () => ({ code: 0, stdout: '', stderr: '' }) };
+  const live = { hosts: { h1: { ...M4_HOST } } };
+  const ctx = new Context();
+  // A volatile field resolves to a ref, so the service must unwrap it (see src/settings.js).
+  const svc = new SshRemoteService(ctx, makeBrowsePool(conn, (cfg) => { acquired = cfg; }), { hosts: { get: () => live.hosts } });
+  svc.setStoredResolver((id) => svc.host(id));
+  assert.equal(svc.host('h1').host, M4_HOST.host);
+  await svc.listRemoteDir('h1', '/data');
+  assert.equal(acquired.id, 'h1');
   ctx.dispose?.();
 });
 

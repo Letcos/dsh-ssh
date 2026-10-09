@@ -261,6 +261,13 @@ test('toWorkdirRelative: workdir-relative display, outside paths pass through', 
 function makeCtx({ hosts = {}, sshPool, officialTools = {} } = {}) {
   const registered = new Map();
   const calls = [];
+  // Hosts resolve through the sshPool service (it owns the plugin config); a supplied
+  // connection double is extended with that lookup.
+  const pool = sshPool
+    ? Object.assign(Object.create(Object.getPrototypeOf(sshPool) ?? Object.prototype), sshPool, {
+        host: sshPool.host ?? ((id) => hosts[id]),
+      })
+    : { host: (id) => hosts[id] };
   return {
     tools: {
       register(def) { registered.set(def.name, def); return () => registered.delete(def.name); },
@@ -273,8 +280,7 @@ function makeCtx({ hosts = {}, sshPool, officialTools = {} } = {}) {
     shell: { sandboxMode: undefined },
     fs: { sandboxMode: undefined },
     get(key) {
-      if (key === 'sshPool') return sshPool;
-      if (key === 'settings') return { get: () => ({ hosts }) };
+      if (key === 'sshPool') return pool;
       return undefined;
     },
     logger: { info: () => {} },

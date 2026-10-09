@@ -120,15 +120,23 @@ test('hook: remote cwd with no systemPrompt service → no throw, no registratio
 });
 
 // ── resolveHostLabel (fallback) ──────────────────────────────────────────────
-test('resolveHostLabel returns null without settings or unknown host', () => {
+test('resolveHostLabel returns null without config or for an unknown host', () => {
   assert.equal(resolveHostLabel(null, HOST_ID), null);
   assert.equal(resolveHostLabel({}, HOST_ID), null);
-  // settings.get throwing → fallback to null
-  const bad = { settings: { get: () => { throw new Error('x'); } } };
+  // a config whose hosts value throws on access → fallback to null
+  const bad = { get hosts() { throw new Error('x'); } };
   assert.equal(resolveHostLabel(bad, HOST_ID), null);
 });
 
-test('resolveHostLabel resolves display name from dsh-ssh-hosts when available', () => {
-  const ctx = { settings: { get: (ns) => ns === 'dsh-ssh-hosts' ? { hosts: { [HOST_ID]: { name: '我的工作站' } } } : null } };
-  assert.equal(resolveHostLabel(ctx, HOST_ID), '我的工作站 (' + HOST_ID + ')');
+test('resolveHostLabel resolves display name from the plugin config when available', () => {
+  const config = { hosts: { [HOST_ID]: { name: '我的工作站' } } };
+  assert.equal(resolveHostLabel(config, HOST_ID), '我的工作站 (' + HOST_ID + ')');
+  // a volatile ref resolves the same way as a plain value
+  const refConfig = { hosts: { get: () => ({ [HOST_ID]: { name: '我的工作站' } }) } };
+  assert.equal(resolveHostLabel(refConfig, HOST_ID), '我的工作站 (' + HOST_ID + ')');
+});
+
+test('resolveHostLabel ignores a host without a usable display name', () => {
+  assert.equal(resolveHostLabel({ hosts: { [HOST_ID]: { name: '' } } }, HOST_ID), null);
+  assert.equal(resolveHostLabel({ hosts: { [HOST_ID]: {} } }, HOST_ID), null);
 });

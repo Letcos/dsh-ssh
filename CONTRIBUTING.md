@@ -126,10 +126,12 @@ PR 的 CI 状态显示在 PR 页面；**fork 来源的 PR 同样受检**（workf
 | `scripts/verify-agent-created.mjs` | agent/created 钩子组合验证：对远端 cwd 会话遮蔽七工具，read 走 SSH 读回远端文件 |
 | `scripts/verify-remote-bg-created.mjs` | 远端后台任务 E2E 验证：sleep 30 后台任务状态/增量输出/kill 进程组 |
 | `scripts/verify-execfs-fallback.mjs` | SFTP 降级（ExecFs）验证：exec+base64 全链路 + 与 SFTP 路径结果对比 |
-| `scripts/client-selfcheck.mjs` | client.js 静态自检（无浏览器）：校验注入契约 / 遮蔽 priority / 内联 Typert 描述符与 lib 一致 —— **从仓库根运行**：`node packages/dsh-ssh/scripts/client-selfcheck.mjs` |
+| `scripts/client-selfcheck.mjs` | client.js 静态自检（无浏览器）：校验注入契约 / 遮蔽 priority / 内联 Typert 描述符与 lib 一致，并逐个核对 primitives 名字确实存在于已安装的 DSH —— **从仓库根运行**：`node packages/dsh-ssh/scripts/client-selfcheck.mjs` |
+| `scripts/verify-typert-codec.mjs` | Typert 描述符契约验证：host/client 两份贡献形状 + 客户端 strict codec 的 `create()` 契约（需 `DSH_SSH_DSH_NODE_MODULES`） |
+| `scripts/verify-settings-0.2.mjs` | 插件服务在真实组合中的装配与 wire 形状验证（`configEditor` 缺席时明确 SKIP 设置表单断言；需 `DSH_SSH_DSH_NODE_MODULES`） |
 | `scripts/e2e-web-3080.mjs` | 3080 真实服务全工具 E2E（8/8）：HTTP API 驱动真实会话跑 8 组工具用例 |
 
-> 多数 live/verify 脚本需配置好真机（默认 ubuntu@203.0.113.10 / id_ed25519，可用环境变量切换）。它们只写远端 /tmp 下自建目录并在结束清理，不碰 ~/.dsh/settings.yaml 与用户 known_hosts。
+> 多数 live/verify 脚本需配置好真机（默认 ubuntu@203.0.113.10 / id_ed25519，可用环境变量切换）。它们只写远端 /tmp 下自建目录并在结束清理，不碰活动 profile 的 `cordis.patch.yml` 与用户 known_hosts。
 
 ### e2e-web-3080.mjs 用法与前置
 

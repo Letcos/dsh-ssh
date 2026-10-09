@@ -48,6 +48,14 @@ function makeMemorySftp(initial = {}) {
 
 function makeCtx({ hosts = {}, sshPool, attachments, jobs } = {}) {
   const registered = new Map();
+  // The routed tools resolve a host through the sshPool service, which owns the plugin
+  // config. A supplied pool is a connection double, so `hosts` is layered onto it when
+  // it does not already resolve hosts itself.
+  const pool = sshPool
+    ? Object.assign(Object.create(Object.getPrototypeOf(sshPool) ?? Object.prototype), sshPool, {
+        host: sshPool.host ?? ((id) => hosts[id]),
+      })
+    : { host: (id) => hosts[id], acquire: async () => { throw new Error('no pool in this fixture'); } };
   return {
     tools: {
       register(def) { registered.set(def.name, def); return () => registered.delete(def.name); },
@@ -56,8 +64,7 @@ function makeCtx({ hosts = {}, sshPool, attachments, jobs } = {}) {
     shell: { sandboxMode: undefined },
     fs: { sandboxMode: undefined },
     get(key) {
-      if (key === 'sshPool') return sshPool;
-      if (key === 'settings') return { get: () => ({ hosts }) };
+      if (key === 'sshPool') return pool;
       if (key === 'attachments') return attachments;
       if (key === 'jobs') return jobs;
       return undefined;

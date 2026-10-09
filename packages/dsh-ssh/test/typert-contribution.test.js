@@ -75,6 +75,44 @@ test('host descriptors use src-json codecs (no bundle validation)', () => {
   assert.equal(d.result.mode, 'src-json');
 });
 
+// A strict codec must expose create() -> schema{parse}; carrying the schema inline makes
+// the registry reject the descriptor at mount time ("strict codec has no create()").
+test('client strict codecs carry create() returning a parse()-capable schema', () => {
+  const seen = [];
+  const inspect = (codec, subject) => {
+    assert.equal(codec.mode, 'strict', subject + ' must be strict');
+    assert.equal(typeof codec.typeSymbol, 'string', subject + ' needs typeSymbol');
+    assert.ok(codec.typeSymbol.length > 0, subject + ' typeSymbol must be nonempty');
+    assert.equal(typeof codec.create, 'function', subject + ' must expose create()');
+    const schema = codec.create();
+    assert.equal(typeof schema.parse, 'function', subject + ' create() must return a schema with parse()');
+    // A passthrough schema returns the boundary value unchanged.
+    const probe = { probe: true };
+    assert.equal(schema.parse(probe), probe, subject + ' strict schema must pass the value through');
+    seen.push(subject);
+  };
+  for (const d of CLIENT_TYPERT_REMOTE.descriptors) {
+    inspect(d.result, d.id + ' result');
+    for (const p of d.parameters) inspect(p.codec, d.id + ' parameter ' + p.name);
+  }
+  assert.ok(seen.length > 0, 'expected client codecs to be inspected');
+});
+
+test('create() materializes one cached schema instance per codec', () => {
+  const codec = CLIENT_TYPERT_REMOTE.descriptors[0].result;
+  assert.equal(codec.create(), codec.create(), 'create() must be stable across boundary uses');
+});
+
+test('no client codec carries an inline schema (the removed 0.1 contract)', () => {
+  const offenders = [];
+  const check = (codec, subject) => { if (codec && 'schema' in codec) offenders.push(subject); };
+  for (const d of CLIENT_TYPERT_REMOTE.descriptors) {
+    check(d.result, d.id + ' result');
+    for (const p of d.parameters) check(p.codec, d.id + ' parameter ' + p.name);
+  }
+  assert.deepEqual(offenders, [], 'strict codecs must not carry an inline schema');
+});
+
 test('wire args align: cfg with source json on both sides', () => {
   const host = HOST_TYPERT_CONTRIBUTION.invocations[0];
   const client = CLIENT_TYPERT_REMOTE.descriptors[0];
@@ -112,4 +150,27 @@ test('shape checker rejects bad contributions (guards regression)', () => {
     ],
   };
   assert.throws(() => assertContributionShape(badWire), /wire field/);
+
+  // The pre-0.2 strict shape (inline schema, no create) must be rejected so a
+  // regression fails here instead of at mount time in the browser.
+  const inlineSchema = {
+    package: 'x', descriptors: [
+      {
+        id: 'x#n/m', service: 's', namespace: 'n', method: 'm', invocation: { kind: 'direct' }, parameters: [],
+        result: { mode: 'strict', typeSymbol: 'x#R', schema: { parse: (v) => v } },
+      },
+    ],
+  };
+  assert.throws(() => assertContributionShape(inlineSchema), /no create\(\)/);
+
+  // create() that does not yield a parse()-capable schema is equally invalid.
+  const badCreate = {
+    package: 'x', descriptors: [
+      {
+        id: 'x#n/m', service: 's', namespace: 'n', method: 'm', invocation: { kind: 'direct' }, parameters: [],
+        result: { mode: 'strict', typeSymbol: 'x#R', create: () => ({}) },
+      },
+    ],
+  };
+  assert.throws(() => assertContributionShape(badCreate), /no parse\(\)/);
 });

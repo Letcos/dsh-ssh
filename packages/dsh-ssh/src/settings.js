@@ -1,21 +1,18 @@
-// @dsh-ssh/dsh-ssh — settings namespace for SSH hosts.
-// Registers the dsh-ssh-hosts namespace (dict of HostConfig, keyed by host id)
-// via the official dsh-settings API: settingsNamespace + ctx.settings.register(...).
-// hosts is a DICT (not an array) so the official settings merge preserves stored
-// secrets when a form leaves the write-only password blank — mergeLayers merges
-// plain objects recursively but replaces arrays wholesale
-// (dsh-settings/lib/index.js:235).
+// @dsh-ssh/dsh-ssh — settings surface for SSH hosts.
+// Hosts live in this plugin's own Config schema: every user-editable leaf carries
+// .volatile(), which is what makes it appear in the settings form and keeps the value
+// live-committable into the running plugin without a remount (dsh-settings: a form is
+// produced only when a volatile node exists). Values resolve through the constructor's
+// config object; the profile patch row's config is the persisted layer.
+// hosts is a DICT (not an array) so a patch that omits auth.password keeps the stored
+// one: the resolver merges plain objects recursively but replaces arrays wholesale.
 import z from '@deepseek-ai/schemastery';
 
-// settingsNamespace() was removed in DSH 0.1.2; settings.register/get accept the
-// bare namespace string. The name must match /^[a-z][a-z0-9-]*$/ (no dots) —
-// hence kebab-case dsh-ssh-hosts.
-export const HOSTS_NAMESPACE = 'dsh-ssh-hosts';
-
-// Legacy namespace (previously dssh-hosts): read-only fallback source. The read
-// side falls back to it only when dsh-ssh-hosts is empty; the write side only
-// writes dsh-ssh-hosts (see readHostsDoc and SshRemoteService saveHost/deleteHost).
-export const LEGACY_HOSTS_NAMESPACE = 'dssh-hosts';
+// Profile patch row id, which is also the settings form's namespace. It is kept at the
+// pre-rename name on purpose: dsh-settings migrates a legacy settings.yaml section into
+// the profile entry whose id equals the section name, so this id is what carries
+// existing user host configs across the 0.2 settings model change.
+export const HOSTS_ENTRY_ID = 'dsh-ssh-hosts';
 
 // HostConfig — one SSH target. Mirrors the ssh-core HostConfig shape.
 export const HostConfigSchema = z.object({
@@ -27,7 +24,7 @@ export const HostConfigSchema = z.object({
   auth: z
     .union([
       z.object({ type: z.const('key'), privateKeyPath: z.string().description('私钥路径; 缺省走 ssh-agent') }),
-      z.object({ type: z.const('password'), password: z.string().role('secret').description('口令; write-only(保存后不回传, 留空沿用已保存值); 当前以明文落 settings.yaml, 属已知待改进项') }),
+      z.object({ type: z.const('password'), password: z.string().role('secret').description('口令; write-only(保存后不回传, 留空沿用已保存值); 当前以明文落 profile patch, 属已知待改进项') }),
     ])
     .default({ type: 'key' })
     .description('认证方式'),
@@ -36,56 +33,53 @@ export const HostConfigSchema = z.object({
   keepaliveIntervalMs: z.number().min(1_000).default(15_000).description('keepalive 间隔(ms)'),
 });
 
-// dsh-ssh-hosts namespace: host dict (id → HostConfig). A dict makes settings'
-// recursive merge preserve the stored password when auth.password is omitted (a
-// write-only field left blank = keep as-is); deletion uses settings.mutate's
-// unset ['hosts', <id>] (mutate paths must be string arrays; numeric indexes are rejected).
-export const HostsSettingsSchema = z.object({
-  hosts: z.dict(HostConfigSchema).default({}).description('SSH 主机配置(id → HostConfig 的持久化载体)'),
+// Connection-pool sizing stays non-volatile: it is composition config, not a user form
+// field, so it must not appear in the settings page.
+// The hosts dict is volatile as a WHOLE object rather than per host entry: a volatile
+// field must sit at a fixed object path, and a dict's keys are not fixed paths.
+export const SshConfigSchema = z.object({
+  maxConnections: z.number().min(1).default(4),
+  maxChannelsPerConnection: z.number().min(1).default(6),
+  hosts: z.dict(HostConfigSchema).default({}).volatile().description('SSH 主机配置(id → HostConfig 的持久化载体)'),
 });
 
-/** Extract the hosts dict from a settings document (tolerant of undefined). */
+/** Extract the hosts dict from a resolved config document (tolerant of undefined). */
+/**
+ * The id → HostConfig dict out of a config object, tolerant of undefined and of both
+ * value shapes a resolved schema produces.
+ */
 export function hostsOf(doc) {
-  return doc && typeof doc === 'object' && doc.hosts && typeof doc.hosts === 'object' ? doc.hosts : {};
+  const hosts = unwrap(doc?.hosts);
+  return hosts && typeof hosts === 'object' ? hosts : {};
 }
 
-function safeGet(get, ns) {
-  try { return get?.(ns); } catch { return undefined; }
+// A volatile field resolves to a stable ref ({ get() }) rather than a plain value, so a
+// live config edit is visible through the same object without re-reading the plugin.
+// Non-volatile fields resolve to plain values, so both shapes must be accepted.
+function unwrap(value) {
+  return value && typeof value.get === 'function' ? value.get() : value;
 }
 
 /**
- * Read the host config document with dssh-hosts → dsh-ssh-hosts fallback. Reads
- * the new namespace first; only when it has no hosts and the legacy namespace
- * still has some do we fall back to the legacy doc, so already-configured hosts
- * are not lost. The write side only writes the new namespace (the full dict is
- * written there on first edit, see SshRemoteService).
- * @param get settings.get(ns) reader function.
- * @returns { doc, hosts, legacy } — legacy is true when the value came from the legacy namespace (migration not yet persisted).
+ * Read the hosts dict out of a plugin config object (volatile refs unwrapped).
+ * The exported config is authoritative — dsh-settings imports a legacy settings.yaml
+ * section into this entry — so there is no second namespace to fall back to.
+ * @param config the plugin's resolved config (may be undefined before activation).
+ * @returns { hosts } — the resolved id → HostConfig dict.
  */
-export function readHostsDoc(get) {
-  const newDoc = safeGet(get, HOSTS_NAMESPACE);
-  const newHosts = hostsOf(newDoc);
-  if (Object.keys(newHosts).length > 0) return { doc: newDoc, hosts: newHosts, legacy: false };
-  const legacyDoc = safeGet(get, LEGACY_HOSTS_NAMESPACE);
-  const legacyHosts = hostsOf(legacyDoc);
-  if (Object.keys(legacyHosts).length > 0) return { doc: legacyDoc, hosts: legacyHosts, legacy: true };
-  return { doc: newDoc ?? { hosts: {} }, hosts: newHosts, legacy: false };
+export function readHosts(config) {
+  return { hosts: hostsOf(config) };
 }
 
-// Register the namespace on a settings-capable ctx (from ctx.inject(['settings'], ...)).
-// base provides the default layer (effective until the user overrides); applies 'live' means changes take effect immediately.
-export function registerSettings(ctx) {
-  const scope = ctx.settings.register(HOSTS_NAMESPACE, HostsSettingsSchema, {
-    applies: 'live',
-    base: { hosts: {} },
-  });
-  // Register the legacy namespace read-only so pre-rename settings.yaml host data
-  // stays readable during the migration window (see readHostsDoc). The write side
-  // never writes it; data migrates wholesale into the new namespace on first edit.
-  ctx.settings.register(LEGACY_HOSTS_NAMESPACE, HostsSettingsSchema, {
-    applies: 'live',
-    base: { hosts: {} },
-  });
-  ctx.logger?.info('[@dsh-ssh/dsh-ssh] settings namespace ' + HOSTS_NAMESPACE + ' registered');
-  return scope;
+// Direct-connection config resolution (tools/test paths) also reads through the plugin
+// config, so a host added in the settings page is visible to the very next tool call.
+export function resolveHostFromConfig(config, hostId) {
+  const id = hostId != null ? String(hostId) : '';
+  if (!id) return undefined;
+  return hostsOf(config)[id];
+}
+
+/** True when the plugin config declares a form the user can edit. */
+export function hasVolatileHosts(config) {
+  return config?.hosts !== undefined;
 }
