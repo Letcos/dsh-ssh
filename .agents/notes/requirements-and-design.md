@@ -131,6 +131,7 @@
 - **配置行 id 是兼容性契约**: profile patch 行 id 取 `dsh-ssh-hosts`(= 旧命名空间名), 因为 dsh-settings 的 `importLegacyDocument` 按 section 名匹配 entry id 来迁移旧 `settings.yaml` 数据。改名会导致老用户主机配置静默不迁移。
 - **远端目录浏览**: Host 侧暴露 Typert 远程服务, Client 侧在 sidebar.workspaces.directoryFlow / conversation.hero.workspace.directoryFlow 槽注入目录选择 UI(槽名定义源: @deepseek-ai/dsh-client-ui-workspace@lib/types/client/contract/slots.d.ts L48-62; owner 契约: occupant 拥有从 open 到 onPicked(path)/onCancel/onError 的完整交互, busy 期间禁用提交)。
 - **Host↔Client**: TypertRemoteService + @Remote(已验证导出: dsh-typert-protocol/lib/index.js:53,140 → TypertRemoteService / Remote / RemoteScope / bindTypertRemote / remoteMethods)。客户端 strict codec 的形状由注册表强制为 `{ mode:'strict', typeSymbol, create: () => {parse} }`(0.2.0-rc.2 起; 内联 `schema` 会被拒), 见 dsh-typert-registry/lib/index.js:562-566。
+- **bash toolview 覆写契约**: 本插件以 key `bash` + priority -1 覆写官方 bash 行, 唯一差异是**把 terminal card 的最终 cwd 由占位路径解码为可读远端路径**。0.2.0-rc.2 起官方 terminal card 模型**不再读 `block.callView`/`resultView`**, 改为解析 `argsRaw` + 结果文本; occupant 还必须接收 owner 注入的 `useDisclosure` 与 `phase`(否则卡片不可点击展开)。上游若再改此模型, 必须同步本插件的 `sshTerminalCardModel`; 回归由 `scripts/client-selfcheck.mjs` 的"真实渲染 bash occupant"断言守住(出处: dsh-client-ui-tool/lib/client.js:929 / :1832-1852 / :2424+)。
 
 ### 4.5 架构图(ASCII)
 
